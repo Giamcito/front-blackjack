@@ -4,6 +4,17 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import Image, { type StaticImageData } from "next/image"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  createGame as apiCreateGame,
+  dealInitial as apiDealInitial,
+  playerHit as apiPlayerHit,
+  dealerPlay as apiDealerPlay,
+  settleBets as apiSettleBets,
+  getGame as apiGetGame,
+  placeBet as apiPlaceBet,
+  type ApiCard,
+  type ApiGame,
+} from "@/lib/blackjackApi"
 // Sonidos vía carpeta public para compatibilidad con Turbopack
 const AUDIO_CHIP = "/Sonidos/dinero.m4a"
 const AUDIO_WIN = "/Sonidos/ganador.mp3"
@@ -196,8 +207,12 @@ const formatCurrency = (n: number) =>
   new Intl.NumberFormat("es-CO", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n)
 
 export default function JuegoPage() {
+  // Modo backend: usa microservicio vía proxy /api/blackjack/*
+  const USE_BACKEND = true
+  const [gameId, setGameId] = useState<string | null>(null)
+  const [apiDump, setApiDump] = useState<string>("")
+  const [apiBusy, setApiBusy] = useState<boolean>(false)
   const [phase, setPhase] = useState<Phase>("betting")
-  // Ref para centrar/scroll al área principal de juego
   const gameAreaRef = useRef<HTMLDivElement | null>(null)
   // Referencia mutable del mazo para evitar duplicaciones al robar varias cartas en un mismo tick.
   const deckRef = useRef<PlayingCard[]>(shuffle(buildDeck(1)))
@@ -209,6 +224,8 @@ export default function JuegoPage() {
   const [bet, setBet] = useState<number>(0)
   const [revealDealer, setRevealDealer] = useState<boolean>(false)
   const [message, setMessage] = useState<string>("Realiza tu apuesta para comenzar")
+  // Cartas restantes reportadas por el backend (si está disponible)
+  const [deckRemaining, setDeckRemaining] = useState<number | null>(null)
   // Saldo al inicio de la ronda para normalizar pagos (win/push/blackjack)
   const roundStartBalanceRef = useRef<number>(balance)
   // Para evitar cierre obsoleto: pasar mano del jugador a la liquidación cuando auto-se planta
@@ -323,6 +340,33 @@ export default function JuegoPage() {
     return card
   }, [])
 
+  // Mapear carta de API a carta con imagen local
+  const mapApiCard = useCallback((c: ApiCard): PlayingCard => {
+    const suit: Suit = c.suit === 0 ? "Trebol" : c.suit === 1 ? "Diamante" : c.suit === 2 ? "Corazon" : "Pica"
+    let rank: Rank
+    if (c.rank === 11) rank = "J"
+    else if (c.rank === 12) rank = "Q"
+    else if (c.rank === 13) rank = "K"
+    else rank = String(c.rank) as Rank
+    return { suit, rank, img: IMAGE_MAP[suit][rank] }
+  }, [])
+
+  const refreshFromApiGame = useCallback((g: ApiGame) => {
+    const p0 = g.players?.[0]
+    const playerCards: PlayingCard[] = (p0?.hand || []).map(mapApiCard)
+    const dealerCards: PlayingCard[] = (g.dealer?.hand || []).map(mapApiCard)
+    setPlayer(playerCards)
+    setDealer(dealerCards)
+    // Si el backend expone cartas restantes del mazo, reflejarlas
+    try {
+      // @ts-ignore - algunos backends incluyen deck.remaining en la respuesta del juego
+      const rem = (g as any)?.deck?.remaining
+      if (typeof rem === 'number') {
+        setDeckRemaining(rem)
+      }
+    } catch {}
+  }, [mapApiCard])
+
   const dealInitial = useCallback(() => {
     const p1 = drawCard()
     const d1 = drawCard()
@@ -363,7 +407,7 @@ export default function JuegoPage() {
     }
   }, [drawCard])
 
-  const startRound = () => {
+  const startRound = async () => {
     if (pendingBet <= 0 || pendingBet > balance) return
     setBet(pendingBet) // actualizará betRef via useEffect
     // Capturar saldo inicial de la ronda y descontar la apuesta
@@ -373,101 +417,237 @@ export default function JuegoPage() {
     })
     setPendingBet(0)
     setMessage("Repartiendo...")
-    // Centrar la vista suavemente en el área de juego
     requestAnimationFrame(() => {
       gameAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
     })
-    setTimeout(dealInitial, 200)
-  }
 
-  const hit = () => {
-    if (phase !== "player") return
-    const c = drawCard()
-    setPlayer(h => {
-      const next = [...h, c]
-      const { total } = handValue(next)
-      if (total > 21) {
-        setPhase("settled")
-        setRevealDealer(true)
-        setMessage("Te pasaste de 21. Pierdes.")
-        playLose() // sonido de perder al pasarse
-      } else if (total === 21) {
-        // Plantarse automáticamente en 21 (no Blackjack al ser >2 cartas)
-        // Guardamos la mano exacta para evitar cierres obsoletos
-        settlementPlayerRef.current = next
-        setTimeout(() => stand(), 150)
+    if (!USE_BACKEND) {
+      setTimeout(dealInitial, 200)
+      return
+    }
+    try {
+      // Reutilizar el mismo juego (y mazo) entre rondas; crear solo si no existe
+      let id = gameId
+      let isNewGame = false
+      if (!id) {
+        const cg = await apiCreateGame(1, 1)
+        id = cg.game.id
+        setGameId(id)
+        // Intentar barajar el mazo del juego recién creado para asegurar aleatoriedad
+        try {
+          // Si el backend devuelve el deck en la respuesta de createGame, usarlo
+          const deckId = cg.game?.deck?.id
+          if (deckId) {
+            const seed = Date.now() & 0x7fffffff
+            const { shuffleDeck: apiShuffleDeck } = await import("@/lib/blackjackApi")
+            await apiShuffleDeck(deckId, seed)
+          }
+        } catch {}
+        isNewGame = true
       }
-      return next
-    })
+      // Sincronizar apuesta en el servidor (para liquidación correcta)
+      try {
+        await apiPlaceBet(id!, 0, pendingBet)
+        await apiDealInitial(id!)
+      } catch {
+        // Si el juego expiró/ no existe en el backend (p.ej. reinicio del microservicio), recrear
+        const cg2 = await apiCreateGame(1, 1)
+        id = cg2.game.id
+        setGameId(id)
+        // Barajar el mazo del juego recreado
+        try {
+          const deckId2 = cg2.game?.deck?.id
+          if (deckId2) {
+            const seed2 = Date.now() & 0x7fffffff
+            const { shuffleDeck: apiShuffleDeck } = await import("@/lib/blackjackApi")
+            await apiShuffleDeck(deckId2, seed2)
+          }
+        } catch {}
+        await apiPlaceBet(id!, 0, pendingBet)
+        await apiDealInitial(id!)
+      }
+      const g = await apiGetGame(id!)
+      refreshFromApiGame(g.game)
+
+      const playerBJ = isBlackjack((g.game.players?.[0]?.hand || []).map(mapApiCard))
+      const dealerBJ = isBlackjack((g.game.dealer?.hand || []).map(mapApiCard))
+      setRevealDealer(false)
+      if (playerBJ || dealerBJ) {
+        setRevealDealer(true)
+        setPhase("settled")
+        if (playerBJ && dealerBJ) {
+          setMessage("Ambos tienen Blackjack. Empate.")
+          setBalance(() => roundStartBalanceRef.current)
+        } else if (playerBJ) {
+          setMessage("¡Blackjack! Pago 3:2")
+          const currentBet = betRef.current
+          setBalance(() => roundStartBalanceRef.current + Math.round(currentBet * 2.5))
+          playWin()
+        } else {
+          setMessage("Crupier tiene Blackjack. Pierdes.")
+          const currentBet = betRef.current
+          setBalance(() => roundStartBalanceRef.current - currentBet)
+          playLose()
+        }
+      } else {
+        setPhase("player")
+        setMessage("Tu turno: pide carta o plántate")
+      }
+    } catch (e) {
+      setMessage("No se pudo iniciar la ronda. Intenta de nuevo.")
+    }
   }
 
-  const stand = () => {
+  const hit = async () => {
+    if (phase !== "player") return
+    if (!USE_BACKEND) {
+      const c = drawCard()
+      setPlayer(h => {
+        const next = [...h, c]
+        const { total } = handValue(next)
+        if (total > 21) {
+          setPhase("settled")
+          setRevealDealer(true)
+          setMessage("Te pasaste de 21. Pierdes.")
+          playLose()
+        } else if (total === 21) {
+          settlementPlayerRef.current = next
+          setTimeout(() => stand(), 150)
+        }
+        return next
+      })
+      return
+    }
+    if (!gameId) return
+    await apiPlayerHit(gameId, 0)
+    const g = await apiGetGame(gameId)
+    refreshFromApiGame(g.game)
+    const total = handValue((g.game.players?.[0]?.hand || []).map(mapApiCard)).total
+    if (total > 21) {
+      setPhase("settled")
+      setRevealDealer(true)
+      setMessage("Te pasaste de 21. Pierdes.")
+      playLose()
+    } else if (total === 21) {
+      settlementPlayerRef.current = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+      setTimeout(() => stand(), 150)
+    }
+  }
+
+  const stand = async () => {
     if (phase !== "player") return
     setRevealDealer(true)
     setPhase("dealer")
 
-    setTimeout(() => {
-      setDealer((current) => {
-        let next = [...current]
-        while (handValue(next).total < 17) {
-          next = [...next, drawCard()]
-        }
-        // Usar la mano forzada si existe (por auto-stand en 21 o doble)
-        const playerForTotal = settlementPlayerRef.current ?? player
-        // Limpiar para la siguiente ronda/acción
-        settlementPlayerRef.current = null
-        const p = handValue(playerForTotal).total
-        const d = handValue(next).total
-        let msg: string
-        if (d > 21) {
-          msg = "Crupier se pasa. ¡Ganas!"
-          // Ganas: saldo final = saldo inicial + apuesta actual (incluye doble si aplica)
-          const currentBet = betRef.current
-          setBalance(() => roundStartBalanceRef.current + currentBet)
-          playWin()
-        } else if (p > d) {
-          msg = "¡Ganas!"
-          const currentBet = betRef.current
-          setBalance(() => roundStartBalanceRef.current + currentBet)
-          playWin()
-        } else if (p < d) {
-          msg = "Pierdes."
-          // Pierdes: saldo final = saldo inicial - apuesta
-          const currentBet = betRef.current
-          setBalance(() => roundStartBalanceRef.current - currentBet)
-          playLose()
-        } else { // p === d (empate/push)
-          msg = "Empate. Se devuelve la apuesta."
-          // Push: saldo final = saldo inicial
-          setBalance(() => roundStartBalanceRef.current)
-        }
-        setMessage(msg)
-        setPhase("settled")
-        return next
-      })
-    }, 250)
+    if (!USE_BACKEND) {
+      setTimeout(() => {
+        setDealer((current) => {
+          let next = [...current]
+          while (handValue(next).total < 17) {
+            next = [...next, drawCard()]
+          }
+          const playerForTotal = settlementPlayerRef.current ?? player
+          settlementPlayerRef.current = null
+          const p = handValue(playerForTotal).total
+          const d = handValue(next).total
+          let msg: string
+          if (d > 21) {
+            msg = "Crupier se pasa. ¡Ganas!"
+            const currentBet = betRef.current
+            setBalance(() => roundStartBalanceRef.current + currentBet)
+            playWin()
+          } else if (p > d) {
+            msg = "¡Ganas!"
+            const currentBet = betRef.current
+            setBalance(() => roundStartBalanceRef.current + currentBet)
+            playWin()
+          } else if (p < d) {
+            msg = "Pierdes."
+            const currentBet = betRef.current
+            setBalance(() => roundStartBalanceRef.current - currentBet)
+            playLose()
+          } else {
+            msg = "Empate. Se devuelve la apuesta."
+            setBalance(() => roundStartBalanceRef.current)
+          }
+          setMessage(msg)
+          setPhase("settled")
+          return next
+        })
+      }, 250)
+      return
+    }
+    if (!gameId) return
+    await apiDealerPlay(gameId)
+    await apiSettleBets(gameId)
+    const g = await apiGetGame(gameId)
+    refreshFromApiGame(g.game)
+    const p = handValue((settlementPlayerRef.current ?? (g.game.players?.[0]?.hand || []).map(mapApiCard)) as PlayingCard[]).total
+    settlementPlayerRef.current = null
+    const d = handValue((g.game.dealer?.hand || []).map(mapApiCard)).total
+    let msg: string
+    if (d > 21) {
+      msg = "Crupier se pasa. ¡Ganas!"
+      const currentBet = betRef.current
+      setBalance(() => roundStartBalanceRef.current + currentBet)
+      playWin()
+    } else if (p > d) {
+      msg = "¡Ganas!"
+      const currentBet = betRef.current
+      setBalance(() => roundStartBalanceRef.current + currentBet)
+      playWin()
+    } else if (p < d) {
+      msg = "Pierdes."
+      const currentBet = betRef.current
+      setBalance(() => roundStartBalanceRef.current - currentBet)
+      playLose()
+    } else {
+      msg = "Empate. Se devuelve la apuesta."
+      setBalance(() => roundStartBalanceRef.current)
+    }
+    setMessage(msg)
+    setPhase("settled")
   }
 
-  const doubleDown = () => {
+  const doubleDown = async () => {
     if (!canDouble) return
     setBalance(b => b - bet)
     setBet(v => v * 2)
-    const c = drawCard()
-    setPlayer(h => {
-      const next = [...h, c]
-      const { total } = handValue(next)
-      if (total > 21) {
-        setPhase("settled")
-        setRevealDealer(true)
-        setMessage("Te pasaste de 21. Pierdes.")
-        playLose()
-      } else {
-        // Guardar mano para evitar cierre obsoleto y auto-plantarse
-        settlementPlayerRef.current = next
-        setTimeout(stand, 150)
-      }
-      return next
-    })
+    if (!USE_BACKEND) {
+      const c = drawCard()
+      setPlayer(h => {
+        const next = [...h, c]
+        const { total } = handValue(next)
+        if (total > 21) {
+          setPhase("settled")
+          setRevealDealer(true)
+          setMessage("Te pasaste de 21. Pierdes.")
+          playLose()
+        } else {
+          settlementPlayerRef.current = next
+          setTimeout(stand, 150)
+        }
+        return next
+      })
+      return
+    }
+    if (!gameId) return
+    // Reflejar doble de apuesta en el servidor
+    try { await apiPlaceBet(gameId, 0, bet) } catch {}
+    await apiPlayerHit(gameId, 0)
+    const g = await apiGetGame(gameId)
+    const next = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+    setPlayer(next)
+    const { total } = handValue(next)
+    if (total > 21) {
+      setPhase("settled")
+      setRevealDealer(true)
+      setMessage("Te pasaste de 21. Pierdes.")
+      playLose()
+    } else {
+      settlementPlayerRef.current = next
+      setTimeout(stand, 150)
+    }
   }
 
   const clearBet = () => setPendingBet(0)
@@ -485,14 +665,46 @@ export default function JuegoPage() {
     setBet(0)
     setPhase("betting")
     setMessage("Realiza tu apuesta para comenzar")
-    if (deckRef.current.length < 30) {
-      deckRef.current = shuffle(buildDeck(1))
-      setShoe(deckRef.current)
+    setApiDump("")
+    // Sólo rebarajar el mazo local en modo sin backend
+    if (!USE_BACKEND) {
+      if (deckRef.current.length < 30) {
+        deckRef.current = shuffle(buildDeck(1))
+        setShoe(deckRef.current)
+      }
     }
     // Reposicionar al inicio en nueva ronda para facilitar apuestas
     requestAnimationFrame(() => {
       gameAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     })
+  }
+
+  // Utilidades de backend para depurar/administrar partida
+  const viewApiState = async () => {
+    if (!USE_BACKEND || !gameId) return
+    setApiBusy(true)
+    try {
+      const g = await apiGetGame(gameId)
+      setApiDump(JSON.stringify(g, null, 2))
+    } catch (e: any) {
+      setApiDump(`Error: ${e?.message ?? "desconocido"}`)
+    } finally {
+      setApiBusy(false)
+    }
+  }
+
+  const resetGame = async () => {
+    // Borra en backend si hay partida activa, y limpia el estado local
+    try {
+      if (USE_BACKEND && gameId) {
+        // Lazy import para evitar circular: usar la firma ya importada arriba
+        const { deleteGame: apiDeleteGame } = await import("@/lib/blackjackApi")
+        await apiDeleteGame(gameId)
+      }
+    } catch {}
+    setGameId(null)
+    setDeckRemaining(null)
+    newRound()
   }
 
   return (
@@ -685,6 +897,29 @@ export default function JuegoPage() {
             </p>
           </div>
         </aside>
+  </div>
+
+      {/* Controles backend (compactos, debajo del juego) */}
+      <div className="mt-6">
+        <div className="mx-auto max-w-4xl px-4">
+          <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-3 rounded-xl bg-black/40 backdrop-blur border border-zinc-600/40">
+            <span className="text-xs text-zinc-300">Game ID: {gameId ?? "—"}</span>
+            {deckRemaining != null && (
+              <span className="text-xs text-zinc-300">Restantes: {deckRemaining}</span>
+            )}
+            <Button size="sm" onClick={viewApiState} disabled={!gameId || apiBusy}>
+              {apiBusy ? "Cargando..." : "Ver estado (API)"}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={resetGame}>
+              Reset partida
+            </Button>
+          </div>
+          {apiDump && (
+            <pre className="mt-3 max-h-60 overflow-auto text-xs text-zinc-200 bg-black/40 p-3 rounded-lg border border-zinc-600/40">
+              {apiDump}
+            </pre>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -1,0 +1,13 @@
+services:
+  backend:
+    container_name: blackjack-service
+    image: blackjack-service:dev
+    build:
+      context: ../../producto-service-main/producto-service-main
+      dockerfile: Dockerfile
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - JAVA_OPTS=
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
