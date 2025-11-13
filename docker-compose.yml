@@ -11,3 +11,15 @@ services:
     ports:
       - "8082:8082"
     restart: unless-stopped
+  conteo:
+    container_name: conteo-service
+    image: conteo-service:dev
+    build:
+      context: ../../conteo-service-master
+      dockerfile: Dockerfile
+    environment:
+      - SERVER_PORT=8083
+      - JAVA_OPTS=
+    ports:
+      - "8083:8083"
+    restart: unless-stopped

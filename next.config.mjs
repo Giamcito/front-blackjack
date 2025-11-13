@@ -14,6 +14,10 @@ const nextConfig = {
         source: '/api/blackjack/:path*',
         destination: 'http://localhost:8082/api/v1/blackjack/:path*',
       },
+      {
+        source: '/api/conteo/:path*',
+        destination: 'http://localhost:8083/counter/:path*',
+      },
     ]
   },
 }
