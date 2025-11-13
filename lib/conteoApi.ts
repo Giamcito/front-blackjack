@@ -1,8 +1,9 @@
 type CountResponse = { count: number }
 
-type InitCounterRequest = { numDecks: number }
+// Backend expects snake_case property names via @JsonProperty
+type InitCounterRequest = { num_decks: number }
 type RegisterCardRequest = { value: number }
-type RecommendationRequest = { playerTotal: number; dealerUpValue: number }
+type RecommendationRequest = { player_total: number; dealer_up_value: number }
 
 async function req<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const res = await fetch(input as any, {
@@ -23,7 +24,7 @@ async function req<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 }
 
 export async function initCounter(numDecks: number) {
-  const body: InitCounterRequest = { numDecks }
+  const body: InitCounterRequest = { num_decks: numDecks }
   return req<void>('/api/conteo/init', { method: 'POST', body: JSON.stringify(body) })
 }
 
@@ -45,7 +46,7 @@ export async function resetCounter() {
 }
 
 export async function recommend(playerTotal: number, dealerUpValue: number) {
-  const body: RecommendationRequest = { playerTotal, dealerUpValue }
+  const body: RecommendationRequest = { player_total: playerTotal, dealer_up_value: dealerUpValue }
   return req<{ recommendation: string }>('/api/conteo/recommend', { method: 'POST', body: JSON.stringify(body) })
 }
 

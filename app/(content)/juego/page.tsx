@@ -15,6 +15,15 @@ import {
   type ApiCard,
   type ApiGame,
 } from "@/lib/blackjackApi"
+import {
+  initCounter as ccInit,
+  registerCard as ccRegister,
+  getRunningCount as ccGetRunning,
+  getTrueCount as ccGetTrue,
+  resetCounter as ccReset,
+  recommend as ccRecommend,
+  getStatus as ccStatus,
+} from "@/lib/conteoApi"
 // Sonidos vía carpeta public para compatibilidad con Turbopack
 const AUDIO_CHIP = "/Sonidos/dinero.m4a"
 const AUDIO_WIN = "/Sonidos/ganador.mp3"
@@ -226,6 +235,11 @@ export default function JuegoPage() {
   const [message, setMessage] = useState<string>("Realiza tu apuesta para comenzar")
   // Cartas restantes reportadas por el backend (si está disponible)
   const [deckRemaining, setDeckRemaining] = useState<number | null>(null)
+  // Conteo: running y true
+  const [runningCount, setRunningCount] = useState<number | null>(null)
+  const [trueCount, setTrueCount] = useState<number | null>(null)
+  const [conteoBusy, setConteoBusy] = useState<boolean>(false)
+  const conteoRegisteredRef = useRef<Set<string>>(new Set())
   // Saldo al inicio de la ronda para normalizar pagos (win/push/blackjack)
   const roundStartBalanceRef = useRef<number>(balance)
   // Para evitar cierre obsoleto: pasar mano del jugador a la liquidación cuando auto-se planta
@@ -351,6 +365,66 @@ export default function JuegoPage() {
     return { suit, rank, img: IMAGE_MAP[suit][rank] }
   }, [])
 
+  // Helpers Conteo
+  const cardPipValue = useCallback((c: PlayingCard): number => {
+    if (c.rank === "1") return 11 // As
+    if (c.rank === "J" || c.rank === "Q" || c.rank === "K") return 10
+    return Number(c.rank)
+  }, [])
+
+  const keyOfCard = (c: PlayingCard) => `${c.suit}-${c.rank}`
+
+  const refreshConteoCounts = useCallback(async () => {
+    try {
+      const [r, t] = await Promise.all([ccGetRunning(), ccGetTrue()])
+      setRunningCount(r.count)
+      setTrueCount(t.count)
+    } catch {}
+  }, [])
+
+  const ensureConteoInitialized = useCallback(async (numDecks: number) => {
+    try {
+      const status = await ccStatus().catch(() => "")
+      if (!status || /not initialized/i.test(status)) {
+        await ccInit(numDecks)
+        conteoRegisteredRef.current.clear()
+      }
+    } catch {}
+    await refreshConteoCounts()
+  }, [refreshConteoCounts])
+
+  const registerVisibleCards = useCallback(async (playerCards: PlayingCard[], dealerCards: PlayingCard[], reveal: boolean) => {
+    const reg = conteoRegisteredRef.current
+    const toRegister: number[] = []
+    for (const c of playerCards) {
+      const k = `P-${keyOfCard(c)}`
+      if (!reg.has(k)) {
+        reg.add(k)
+        toRegister.push(cardPipValue(c))
+      }
+    }
+    // Solo carta visible del dealer si no se revela
+    const dealerVisible = reveal ? dealerCards : dealerCards.slice(0, 1)
+    for (const c of dealerVisible) {
+      const k = `D-${keyOfCard(c)}`
+      if (!reg.has(k)) {
+        reg.add(k)
+        toRegister.push(cardPipValue(c))
+      }
+    }
+    if (toRegister.length > 0) {
+      setConteoBusy(true)
+      try {
+        // Registrar en orden
+        for (const v of toRegister) {
+          await ccRegister(v)
+        }
+      } catch {}
+      setConteoBusy(false)
+      await refreshConteoCounts()
+    }
+  }, [cardPipValue, refreshConteoCounts])
+
   const refreshFromApiGame = useCallback((g: ApiGame) => {
     const p0 = g.players?.[0]
     const playerCards: PlayingCard[] = (p0?.hand || []).map(mapApiCard)
@@ -365,6 +439,8 @@ export default function JuegoPage() {
         setDeckRemaining(rem)
       }
     } catch {}
+    // Registrar solo visibles (dealer: 1) después de deal si aún no se reveló
+    registerVisibleCards(playerCards, dealerCards, false)
   }, [mapApiCard])
 
   const dealInitial = useCallback(() => {
@@ -433,6 +509,8 @@ export default function JuegoPage() {
         const cg = await apiCreateGame(1, 1)
         id = cg.game.id
         setGameId(id)
+        // Inicializar conteo (si aún no) con el número de mazos del juego
+        await ensureConteoInitialized(cg.game?.deck?.numDecks || 1)
         // Intentar barajar el mazo del juego recién creado para asegurar aleatoriedad
         try {
           // Si el backend devuelve el deck en la respuesta de createGame, usarlo
@@ -454,6 +532,7 @@ export default function JuegoPage() {
         const cg2 = await apiCreateGame(1, 1)
         id = cg2.game.id
         setGameId(id)
+        await ensureConteoInitialized(cg2.game?.deck?.numDecks || 1)
         // Barajar el mazo del juego recreado
         try {
           const deckId2 = cg2.game?.deck?.id
@@ -522,6 +601,11 @@ export default function JuegoPage() {
     await apiPlayerHit(gameId, 0)
     const g = await apiGetGame(gameId)
     refreshFromApiGame(g.game)
+    // Registrar la nueva carta pedida del jugador
+    try {
+      const cards = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+      await registerVisibleCards(cards.slice(-1), [], false)
+    } catch {}
     const total = handValue((g.game.players?.[0]?.hand || []).map(mapApiCard)).total
     if (total > 21) {
       setPhase("settled")
@@ -582,6 +666,12 @@ export default function JuegoPage() {
     await apiSettleBets(gameId)
     const g = await apiGetGame(gameId)
     refreshFromApiGame(g.game)
+    // Ahora se revelan todas las cartas del dealer: registrar las nuevas visibles
+    try {
+      const pCards = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+      const dCards = (g.game.dealer?.hand || []).map(mapApiCard)
+      await registerVisibleCards(pCards, dCards, true)
+    } catch {}
     const p = handValue((settlementPlayerRef.current ?? (g.game.players?.[0]?.hand || []).map(mapApiCard)) as PlayingCard[]).total
     settlementPlayerRef.current = null
     const d = handValue((g.game.dealer?.hand || []).map(mapApiCard)).total
@@ -666,6 +756,7 @@ export default function JuegoPage() {
     setPhase("betting")
     setMessage("Realiza tu apuesta para comenzar")
     setApiDump("")
+  // No reseteamos conteo por defecto (se mantiene por zapato). Si quieres reiniciar, usa botón "Reset conteo".
     // Sólo rebarajar el mazo local en modo sin backend
     if (!USE_BACKEND) {
       if (deckRef.current.length < 30) {
@@ -704,6 +795,7 @@ export default function JuegoPage() {
     } catch {}
     setGameId(null)
     setDeckRemaining(null)
+    conteoRegisteredRef.current.clear()
     newRound()
   }
 
@@ -907,11 +999,54 @@ export default function JuegoPage() {
             {deckRemaining != null && (
               <span className="text-xs text-zinc-300">Restantes: {deckRemaining}</span>
             )}
+            {runningCount != null && (
+              <span className="text-xs text-emerald-300">Running: {runningCount}</span>
+            )}
+            {trueCount != null && (
+              <span className="text-xs text-emerald-300">True: {trueCount}</span>
+            )}
             <Button size="sm" onClick={viewApiState} disabled={!gameId || apiBusy}>
               {apiBusy ? "Cargando..." : "Ver estado (API)"}
             </Button>
             <Button size="sm" variant="secondary" onClick={resetGame}>
               Reset partida
+            </Button>
+            <Button size="sm" variant="outline" onClick={async () => {
+              setConteoBusy(true)
+              try {
+                await ccReset()
+              } catch {
+                // Si no está inicializado, inicializar de forma segura y continuar
+                try {
+                  let decks = 1
+                  if (gameId) {
+                    try {
+                      const g = await apiGetGame(gameId)
+                      decks = g.game?.deck?.numDecks || 1
+                    } catch {}
+                  } else if (deckRemaining != null) {
+                    decks = Math.max(1, Math.round((deckRemaining as number) / 52))
+                  }
+                  await ensureConteoInitialized(decks)
+                } catch {}
+              } finally {
+                conteoRegisteredRef.current.clear()
+                await refreshConteoCounts()
+                setConteoBusy(false)
+              }
+            }} disabled={conteoBusy}>
+              {conteoBusy ? "..." : "Reset conteo"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={async () => {
+              try {
+                // Recomendación según totales actuales visibles
+                const rec = await ccRecommend(playerTotal, dealer.length > 0 ? cardPipValue(dealer[0]) : 2)
+                const r = (rec.recommendation || '').toUpperCase()
+                const recEs = r === 'HIT' ? 'Pedir carta' : r === 'STAND' ? 'Plantarse' : rec.recommendation
+                setMessage(`Sugerencia: ${recEs}`)
+              } catch {}
+            }}>
+              Recomendar
             </Button>
           </div>
           {apiDump && (

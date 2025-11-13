@@ -15,7 +15,7 @@ services:
     container_name: conteo-service
     image: conteo-service:dev
     build:
-      context: ../../conteo-service-master
+      context: ./backend/conteo-service
       dockerfile: Dockerfile
     environment:
       - SERVER_PORT=8083
