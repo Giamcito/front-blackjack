@@ -18,6 +18,10 @@ const nextConfig = {
         source: '/api/conteo/:path*',
         destination: 'http://localhost:8083/counter/:path*',
       },
+      {
+        source: '/api/ruleta/:path*',
+        destination: 'http://localhost:8084/roulette/:path*',
+      },
     ]
   },
 }

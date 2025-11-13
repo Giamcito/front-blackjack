@@ -3,7 +3,7 @@ services:
     container_name: blackjack-service
     image: blackjack-service:dev
     build:
-      context: ../../producto-service-main/producto-service-main
+      context: ./backend/producto-service-main
       dockerfile: Dockerfile
     environment:
       - SPRING_PROFILES_ACTIVE=dev
@@ -22,4 +22,16 @@ services:
       - JAVA_OPTS=
     ports:
       - "8083:8083"
+    restart: unless-stopped
+  ruleta:
+    container_name: ruleta-service
+    image: ruleta-service:dev
+    build:
+      context: ./backend/ruleta-service
+      dockerfile: Dockerfile
+    environment:
+      - SERVER_PORT=8084
+      - JAVA_OPTS=
+    ports:
+      - "8084:8084"
     restart: unless-stopped
