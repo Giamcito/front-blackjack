@@ -22,6 +22,10 @@ const nextConfig = {
         source: '/api/ruleta/:path*',
         destination: 'http://localhost:8084/roulette/:path*',
       },
+      {
+        source: '/api/users/:path*',
+        destination: 'http://localhost:8085/:path*',
+      },
     ]
   },
 }

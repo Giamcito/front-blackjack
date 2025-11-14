@@ -24,6 +24,8 @@ import {
   recommend as ccRecommend,
   getStatus as ccStatus,
 } from "@/lib/conteoApi"
+import { me as userMe, adjustChips as userAdjustChips } from "@/lib/userApi"
+import Protected from "@/components/protected"
 // Sonidos vía carpeta public para compatibilidad con Turbopack
 const AUDIO_CHIP = "/Sonidos/dinero.m4a"
 const AUDIO_WIN = "/Sonidos/ganador.mp3"
@@ -228,7 +230,7 @@ export default function JuegoPage() {
   const [shoe, setShoe] = useState<PlayingCard[]>(deckRef.current)
   const [player, setPlayer] = useState<PlayingCard[]>([])
   const [dealer, setDealer] = useState<PlayingCard[]>([])
-  const [balance, setBalance] = useState<number>(1000)
+  const [balance, setBalance] = useState<number>(0)
   const [pendingBet, setPendingBet] = useState<number>(0)
   const [bet, setBet] = useState<number>(0)
   const [revealDealer, setRevealDealer] = useState<boolean>(false)
@@ -338,6 +340,28 @@ export default function JuegoPage() {
     ensureAudio()
     playAudioOrBeep(chipAudioRef.current, "chip")
   }, [ensureAudio, playAudioOrBeep])
+
+  // Cargar saldo desde el servicio de usuarios al montar
+  useEffect(() => {
+    let mounted = true
+    userMe().then(u => { if (mounted) setBalance(u.chips) }).catch(() => {})
+    return () => { mounted = false }
+  }, [])
+
+  // Helper para sincronizar delta de fichas con el backend y reflejar saldo real
+  const syncChipsDelta = useCallback(async (delta: number) => {
+    try {
+      if (delta !== 0) {
+        const u = await userAdjustChips(delta)
+        setBalance(u.chips)
+      } else {
+        const u = await userMe()
+        setBalance(u.chips)
+      }
+    } catch {
+      // Ignorar errores (p. ej. no autenticado), mantener saldo local
+    }
+  }, [])
 
   const playerTotal = useMemo(() => handValue(player).total, [player])
   const dealerTotal = useMemo(() => handValue(dealer).total, [dealer])
@@ -462,20 +486,23 @@ export default function JuegoPage() {
       setPhase("settled")
       if (playerBJ && dealerBJ) {
         setMessage("Ambos tienen Blackjack. Empate.")
-        // Empate: restaurar exactamente el saldo inicial de la ronda
+        // Empate: delta 0
         setBalance(() => roundStartBalanceRef.current)
+        void syncChipsDelta(0)
       } else if (playerBJ) {
         setMessage("¡Blackjack! Pago 3:2")
         // Pago total = apuesta + 1.5x de ganancia; saldo final = saldo inicial + 2.5 * bet
         const currentBet = betRef.current
         setBalance(() => roundStartBalanceRef.current + Math.round(currentBet * 2.5))
         playWin()
+        void syncChipsDelta(Math.round(currentBet * 1.5))
       } else {
         setMessage("Crupier tiene Blackjack. Pierdes.")
         // Pierde: saldo final = saldo inicial - apuesta
         const currentBet = betRef.current
         setBalance(() => roundStartBalanceRef.current - currentBet)
         playLose()
+        void syncChipsDelta(-currentBet)
       }
     } else {
       setPhase("player")
@@ -589,6 +616,7 @@ export default function JuegoPage() {
           setRevealDealer(true)
           setMessage("Te pasaste de 21. Pierdes.")
           playLose()
+          void syncChipsDelta(-betRef.current)
         } else if (total === 21) {
           settlementPlayerRef.current = next
           setTimeout(() => stand(), 150)
@@ -612,6 +640,7 @@ export default function JuegoPage() {
       setRevealDealer(true)
       setMessage("Te pasaste de 21. Pierdes.")
       playLose()
+      await syncChipsDelta(-betRef.current)
     } else if (total === 21) {
       settlementPlayerRef.current = (g.game.players?.[0]?.hand || []).map(mapApiCard)
       setTimeout(() => stand(), 150)
@@ -640,19 +669,23 @@ export default function JuegoPage() {
             const currentBet = betRef.current
             setBalance(() => roundStartBalanceRef.current + currentBet)
             playWin()
+            void syncChipsDelta(currentBet)
           } else if (p > d) {
             msg = "¡Ganas!"
             const currentBet = betRef.current
             setBalance(() => roundStartBalanceRef.current + currentBet)
             playWin()
+            void syncChipsDelta(currentBet)
           } else if (p < d) {
             msg = "Pierdes."
             const currentBet = betRef.current
             setBalance(() => roundStartBalanceRef.current - currentBet)
             playLose()
+            void syncChipsDelta(-currentBet)
           } else {
             msg = "Empate. Se devuelve la apuesta."
             setBalance(() => roundStartBalanceRef.current)
+            void syncChipsDelta(0)
           }
           setMessage(msg)
           setPhase("settled")
@@ -681,19 +714,23 @@ export default function JuegoPage() {
       const currentBet = betRef.current
       setBalance(() => roundStartBalanceRef.current + currentBet)
       playWin()
+      await syncChipsDelta(currentBet)
     } else if (p > d) {
       msg = "¡Ganas!"
       const currentBet = betRef.current
       setBalance(() => roundStartBalanceRef.current + currentBet)
       playWin()
+      await syncChipsDelta(currentBet)
     } else if (p < d) {
       msg = "Pierdes."
       const currentBet = betRef.current
       setBalance(() => roundStartBalanceRef.current - currentBet)
       playLose()
+      await syncChipsDelta(-currentBet)
     } else {
       msg = "Empate. Se devuelve la apuesta."
       setBalance(() => roundStartBalanceRef.current)
+      await syncChipsDelta(0)
     }
     setMessage(msg)
     setPhase("settled")
@@ -713,6 +750,7 @@ export default function JuegoPage() {
           setRevealDealer(true)
           setMessage("Te pasaste de 21. Pierdes.")
           playLose()
+          void syncChipsDelta(-betRef.current)
         } else {
           settlementPlayerRef.current = next
           setTimeout(stand, 150)
@@ -734,6 +772,7 @@ export default function JuegoPage() {
       setRevealDealer(true)
       setMessage("Te pasaste de 21. Pierdes.")
       playLose()
+      await syncChipsDelta(-betRef.current)
     } else {
       settlementPlayerRef.current = next
       setTimeout(stand, 150)
@@ -800,6 +839,7 @@ export default function JuegoPage() {
   }
 
   return (
+  <Protected>
   <div className="relative mx-auto max-w-7xl px-2 md:px-4" onPointerDown={ensureAudio}>
       <h1 className="font-[var(--font-display)] text-3xl md:text-4xl font-bold text-center mb-3 text-[var(--casino-gold)]">
         Blackjack Educativo
@@ -974,6 +1014,7 @@ export default function JuegoPage() {
           <div className="px-5 py-4 rounded-2xl bg-black/55 backdrop-blur border border-[var(--casino-gold)]/50 shadow-md">
             <p className="text-xs uppercase tracking-wider text-[var(--casino-gold)] font-semibold mb-1">Saldo</p>
             <p className="text-2xl font-bold text-[var(--casino-gold)] drop-shadow">{formatCurrency(balance)}</p>
+            <p className="text-[10px] text-zinc-300 mt-1">El saldo se sincroniza con tu cuenta al finalizar cada ronda.</p>
           </div>
           <div className="px-5 py-4 rounded-2xl bg-black/50 backdrop-blur border border-primary/40 shadow-md">
             <p className="text-xs uppercase tracking-wider text-primary font-semibold mb-1">Apuesta</p>
@@ -1057,5 +1098,6 @@ export default function JuegoPage() {
         </div>
       </div>
     </div>
+  </Protected>
   )
 }
