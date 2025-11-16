@@ -1,5 +1,9 @@
+"use client"
+import Protected from "@/components/protected"
+
 export default function ConfiguracionPage() {
   return (
+    <Protected>
     <div className="container mx-auto max-w-4xl py-8">
       <h1 className="font-[var(--font-display)] text-4xl md:text-5xl font-bold mb-6 text-[var(--casino-gold)]">
         Configuración
@@ -9,5 +13,6 @@ export default function ConfiguracionPage() {
         (gestión de perfil, ajustes de juego, progreso, etc.).
       </p>
     </div>
+    </Protected>
   )
 }
