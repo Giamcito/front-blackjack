@@ -66,7 +66,7 @@ export function Navbar() {
               <Button
                 variant={pathname === href ? "default" : "ghost"}
                 className={cn(
-                  "px-4",
+                  "cursor-pointer px-4",
                   pathname === href && "bg-primary text-primary-foreground"
                 )}
               >

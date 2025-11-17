@@ -14,10 +14,10 @@ export default function PerfilPage() {
 
   // Sync chips after auth loaded
   useEffect(() => {
-    if (!loading && user) {
-      setChips(user.chips)
-    }
-  }, [loading, user])
+      if (!loading && user) {
+        setChips(user.chips)
+      }
+    }, [loading, user])
 
   const changeChips = async (delta: number) => {
     if (!user) return
@@ -34,16 +34,36 @@ export default function PerfilPage() {
     <div className="mx-auto max-w-md px-3">
       <h1 className="font-[var(--font-display)] text-3xl font-bold text-[var(--casino-gold)] text-center my-6">Perfil</h1>
       <Card>
-        <CardContent className="p-4 space-y-3 text-sm">
-          <div>Usuario: <span className="font-semibold">{user.username}</span></div>
-          <div>Fichas: <span className="font-semibold">{chips != null ? chips : "—"}</span></div>
-          <div className="flex flex-wrap gap-2 mt-3">
-            <Button size="sm" disabled={busy} onClick={() => changeChips(+100)}>+100</Button>
-            <Button size="sm" disabled={busy} onClick={() => changeChips(-100)}>-100</Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={refresh}>Actualizar</Button>
+        <CardContent className="p-4 text-sm">
+          <div className="flex items-center gap-4">
+            <div className="flex-shrink-0">
+              {/* Coloca la imagen `perfil-avatar.png` en la carpeta `public/` */}
+              <img
+                src="/perfil-avatar.png"
+                alt="Avatar"
+                className="w-20 h-20 rounded-full object-cover ring-2 ring-[var(--casino-gold)] shadow-md"
+              />
+            </div>
+            <div className="flex-1">
+              <div className="text-lg font-semibold">{user.username}</div>
+              <div className="text-xs text-muted-foreground">Miembro</div>
+              <div className="mt-2 text-sm">Fichas: <span className="font-semibold">{chips != null ? chips : "—"}</span></div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button size="sm" disabled={busy} onClick={() => changeChips(+100)}>+100</Button>
+              <Button size="sm" disabled={busy} onClick={() => changeChips(-100)}>-100</Button>
+            </div>
           </div>
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <p className="text-xs text-muted-foreground mt-2">Estos ajustes son temporales para pruebas. Luego se limitarán según reglas de juego.</p>
+
+          <div className="mt-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={busy} onClick={refresh}>Actualizar</Button>
+              <Button size="sm" variant="ghost">Editar perfil</Button>
+            </div>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+          </div>
+
+          <p className="text-xs text-muted-foreground mt-3">Estos ajustes son temporales para pruebas. Luego se limitarán según reglas de juego.</p>
         </CardContent>
       </Card>
     </div>

@@ -237,6 +237,19 @@ export default function JuegoPage() {
   const [message, setMessage] = useState<string>("Realiza tu apuesta para comenzar")
   // Cartas restantes reportadas por el backend (si está disponible)
   const [deckRemaining, setDeckRemaining] = useState<number | null>(null)
+  // Selección de color del tablero (tonos medianamente oscuros)
+  const BOARD_COLORS: Record<string, { from: string; to: string; label: string }> = {
+    // Verde original: usar variables CSS para mantener la apariencia previa
+    green: { from: "var(--casino-felt)", to: "var(--casino-green)", label: "Verde" },
+    rojo: { from: "#7f1d1d", to: "#991b1b", label: "Rojo" },
+    azul: { from: "#0f172a", to: "#1e3a8a", label: "Azul" },
+    amarillo: { from: "#92400e", to: "#b45309", label: "Amarillo" },
+    rosa: { from: "#6b1230", to: "#9f1239", label: "Rosa" },
+    gris: { from: "#111827", to: "#374151", label: "Gris" },
+    negro: { from: "#030712", to: "#0b1221", label: "Negro" },
+    cafe: { from: "#3b2418", to: "#4b2e2a", label: "Café" },
+  }
+  const [boardColor, setBoardColor] = useState<string>("green")
   // Conteo: running y true
   const [runningCount, setRunningCount] = useState<number | null>(null)
   const [trueCount, setTrueCount] = useState<number | null>(null)
@@ -852,13 +865,15 @@ export default function JuegoPage() {
         {/* Tablero principal */}
         <Card
           ref={gameAreaRef}
-          className="flex-1 bg-gradient-to-br from-[var(--casino-felt)] via-emerald-800 to-[var(--casino-green)] border-[var(--casino-gold)]/40 overflow-hidden relative shadow-2xl rounded-3xl"
+          className="flex-1 border-[var(--casino-gold)]/40 overflow-hidden relative shadow-2xl rounded-3xl"
+          style={{ background: `linear-gradient(135deg, ${BOARD_COLORS[boardColor].from}, ${BOARD_COLORS[boardColor].to})` }}
         >
           <CardContent className="p-0">
             <div className="relative min-h-[620px] flex flex-col items-center justify-center p-8">
               {/* Fondo decorativo animado */}
               <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.08),transparent_60%),radial-gradient(circle_at_70%_70%,rgba(255,215,0,0.08),transparent_65%)]" />
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--casino-green)_0%,_var(--casino-felt)_100%)] mix-blend-overlay" />
+              {/* Viñeta neutra para oscurecer bordes sin teñir el color del tablero */}
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.32)_100%)] pointer-events-none" />
 
             <div className="relative z-10 w-full max-w-4xl">
               {/* Dealer */}
@@ -937,7 +952,7 @@ export default function JuegoPage() {
                     <button
                       key={chip.label}
                       onClick={() => addChip(chip.amount)}
-                      className={`w-14 h-14 md:w-16 md:h-16 rounded-full ${chip.color} ${chip.border} border-4 flex items-center justify-center font-bold text-white shadow-lg hover:scale-110 transition-transform disabled:opacity-50`}
+                      className={`w-14 h-14 md:w-16 md:h-16 rounded-full ${chip.color} ${chip.border} border-4 flex items-center justify-center font-bold text-white shadow-lg hover:scale-110 transition-transform disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed`}
                       disabled={pendingBet >= balance}
                       aria-label={`Agregar ficha de ${chip.label}`}
                     >
@@ -950,7 +965,7 @@ export default function JuegoPage() {
                   <Button
                     size="lg"
                     variant="default"
-                    className="min-w-32 h-14 text-base font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition"
+                    className="min-w-32 h-14 text-base font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
                     onClick={hit}
                     disabled={phase !== "player"}
                   >
@@ -959,7 +974,7 @@ export default function JuegoPage() {
                   <Button
                     size="lg"
                     variant="destructive"
-                    className="min-w-32 h-14 text-base font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition"
+                    className="min-w-32 h-14 text-base font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
                     onClick={stand}
                     disabled={phase !== "player"}
                   >
@@ -967,7 +982,7 @@ export default function JuegoPage() {
                   </Button>
                   <Button
                     size="lg"
-                    className="min-w-32 h-14 text-base font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/90 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition"
+                    className="min-w-32 h-14 text-base font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/90 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
                     onClick={doubleDown}
                     disabled={!canDouble}
                   >
@@ -976,7 +991,7 @@ export default function JuegoPage() {
                   {phase === "settled" && (
                     <Button
                       size="lg"
-                      className="min-w-32 h-14 text-base font-semibold bg-[var(--casino-gold)] text-background hover:bg-[var(--casino-gold)]/90 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition"
+                      className="min-w-32 h-14 text-base font-semibold bg-[var(--casino-gold)] text-background hover:bg-[var(--casino-gold)]/90 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
                       onClick={newRound}
                     >
                       Nueva Ronda
@@ -987,12 +1002,12 @@ export default function JuegoPage() {
 
               {phase === "betting" ? (
                 <div className="grid grid-cols-2 gap-4">
-                  <Button size="lg" variant="destructive" className="w-full text-base" onClick={clearBet} disabled={pendingBet === 0}>
+                  <Button size="lg" variant="destructive" className="w-full text-base cursor-pointer disabled:cursor-not-allowed" onClick={clearBet} disabled={pendingBet === 0}>
                     Limpiar
                   </Button>
                   <Button
                     size="lg"
-                    className="w-full bg-primary hover:bg-primary/90 text-base"
+                    className="w-full bg-primary hover:bg-primary/90 text-base cursor-pointer disabled:cursor-not-allowed"
                     onClick={startRound}
                     disabled={pendingBet === 0 || pendingBet > balance}
                   >
@@ -1029,6 +1044,22 @@ export default function JuegoPage() {
               {phase === "settled" && "Ronda finalizada"}
             </p>
           </div>
+          <div className="px-5 py-4 rounded-2xl bg-black/30 backdrop-blur border border-zinc-600/30 shadow-md">
+            <p className="text-xs uppercase tracking-wider text-zinc-300 font-semibold mb-1">Tablero</p>
+            <p className="text-sm text-zinc-200 mb-2">Color del tablero</p>
+                <div className="flex gap-2 flex-wrap">
+              {Object.entries(BOARD_COLORS).map(([key, c]) => (
+                <button
+                  key={key}
+                  onClick={() => setBoardColor(key)}
+                  title={c.label}
+                  aria-label={`Seleccionar color ${c.label}`}
+                      className={`w-8 h-8 rounded-full border-2 flex-shrink-0 transition-transform hover:scale-105 ${boardColor === key ? 'ring-2 ring-offset-1 ring-[var(--casino-gold)]' : ''} cursor-pointer disabled:cursor-not-allowed`}
+                  style={{ background: `linear-gradient(135deg, ${c.from}, ${c.to})` }}
+                />
+              ))}
+            </div>
+          </div>
         </aside>
   </div>
 
@@ -1046,13 +1077,13 @@ export default function JuegoPage() {
             {trueCount != null && (
               <span className="text-xs text-emerald-300">True: {trueCount}</span>
             )}
-            <Button size="sm" onClick={viewApiState} disabled={!gameId || apiBusy}>
+            <Button size="sm" className="cursor-pointer disabled:cursor-not-allowed" onClick={viewApiState} disabled={!gameId || apiBusy}>
               {apiBusy ? "Cargando..." : "Ver estado (API)"}
             </Button>
-            <Button size="sm" variant="secondary" onClick={resetGame}>
+            <Button size="sm" variant="secondary" className="cursor-pointer disabled:cursor-not-allowed" onClick={resetGame}>
               Reset partida
             </Button>
-            <Button size="sm" variant="outline" onClick={async () => {
+            <Button size="sm" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" onClick={async () => {
               setConteoBusy(true)
               try {
                 await ccReset()
@@ -1078,7 +1109,7 @@ export default function JuegoPage() {
             }} disabled={conteoBusy}>
               {conteoBusy ? "..." : "Reset conteo"}
             </Button>
-            <Button size="sm" variant="outline" onClick={async () => {
+            <Button size="sm" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" onClick={async () => {
               try {
                 // Recomendación según totales actuales visibles
                 const rec = await ccRecommend(playerTotal, dealer.length > 0 ? cardPipValue(dealer[0]) : 2)

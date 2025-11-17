@@ -35,24 +35,20 @@ export default function Home() {
             Aprende, juega y domina el arte del Blackjack
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <div className="flex flex-col items-center gap-4 justify-center">
             <Button
               asChild
-              size="lg"
-              className="bg-primary hover:bg-primary/90 text-primary-foreground text-lg px-8 py-6"
+              className="rounded-3xl text-2xl md:text-3xl px-10 md:px-12 py-6 md:py-8 font-extrabold bg-[var(--casino-gold)] text-black shadow-lg hover:brightness-105 transition-all w-full max-w-xs"
             >
-              <Link href="/reglas">Aprender Reglas</Link>
-            </Button>
-            <Button asChild size="lg" variant="secondary" className="text-lg px-8 py-6">
               <Link href="/juego">Jugar</Link>
             </Button>
+
             <Button
               asChild
-              size="lg"
-              variant="outline"
-              className="text-lg px-8 py-6 border-[var(--casino-gold)] text-[var(--casino-gold)] hover:bg-[var(--casino-gold)]/10 bg-transparent"
+              size="sm"
+              className="mt-2 text-sm md:text-base px-6 py-3 bg-primary/100 text-primary-foreground hover:bg-primary/20 transition-colors rounded w-full max-w-xs"
             >
-              <Link href="/configuracion">Configuración</Link>
+              <Link href="/reglas">Aprender Reglas</Link>
             </Button>
           </div>
 
