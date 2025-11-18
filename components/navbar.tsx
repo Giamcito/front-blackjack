@@ -5,6 +5,14 @@ import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { logout as apiLogout, me } from "@/lib/userApi"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Menu } from "lucide-react"
 
 import { useEffect, useState } from "react"
 
@@ -79,20 +87,30 @@ export function Navbar() {
           )}
         </nav>
 
-        {/* Compact menu for mobile with simple links */}
+        {/* Mobile: menú desplegable (hamburger) */}
         <div className="flex md:hidden">
-          <div className="flex items-center gap-1">
-            {links.map(({ href, label }) => (
-              <Link key={href} href={href} className="inline-flex">
-                <Button variant={pathname === href ? "default" : "ghost"} size="sm">
-                  {label}
-                </Button>
-              </Link>
-            ))}
-            {authenticated && (
-              <Button variant="outline" size="sm" onClick={onLogout}>Salir</Button>
-            )}
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Abrir menú">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {links.map(({ href, label }) => (
+                <DropdownMenuItem key={href} asChild>
+                  <Link href={href} className={cn("w-full", pathname === href && "font-semibold")}>{label}</Link>
+                </DropdownMenuItem>
+              ))}
+              {authenticated && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onLogout() }} variant="destructive">
+                    Salir
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>

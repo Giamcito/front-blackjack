@@ -1,38 +1,16 @@
 services:
-  backend:
-    container_name: blackjack-service
-    image: blackjack-service:dev
+  backend-stack:
+    container_name: casino-backend
+    image: casino-backend:dev
     build:
-      context: ./backend/producto-service-main
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./backend/all-in-one/Dockerfile
     environment:
       - SPRING_PROFILES_ACTIVE=dev
       - JAVA_OPTS=
     ports:
       - "8082:8082"
-    restart: unless-stopped
-  conteo:
-    container_name: conteo-service
-    image: conteo-service:dev
-    build:
-      context: ./backend/conteo-service
-      dockerfile: Dockerfile
-    environment:
-      - SERVER_PORT=8083
-      - JAVA_OPTS=
-    ports:
       - "8083:8083"
-    restart: unless-stopped
-  ruleta:
-    container_name: ruleta-service
-    image: ruleta-service:dev
-    build:
-      context: ./backend/ruleta-service
-      dockerfile: Dockerfile
-    environment:
-      - SERVER_PORT=8084
-      - JAVA_OPTS=
-    ports:
       - "8084:8084"
     restart: unless-stopped
   db-users:
