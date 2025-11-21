@@ -1,11 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { spin, type RouletteBet, type RouletteBetType, rouletteStatus, type SpinResult } from "@/lib/ruletaApi"
 import { adjustChips, me, type MeResponse } from "@/lib/userApi"
 import Protected from "@/components/protected"
+import RouletteWheel, { type RouletteWheelRef } from "@/components/roulette-wheel"
 
 const BET_TYPES: { value: RouletteBetType; label: string }[] = [
   { value: "STRAIGHT", label: "Número (35:1)" },
@@ -26,6 +27,7 @@ export default function RuletaPage() {
   const [result, setResult] = useState<SpinResult | null>(null)
   const [error, setError] = useState<string>("")
   const [chips, setChips] = useState<number | null>(null)
+  const wheelRef = useRef<RouletteWheelRef>(null)
 
   useEffect(() => {
     let mounted = true
@@ -80,6 +82,10 @@ export default function RuletaPage() {
     setBusy(true); setError("")
     try {
       const r = await spin({ bets })
+      // Animar la ruleta hacia el número obtenido y solo entonces mostrar el resultado
+      try {
+        await wheelRef.current?.spinTo(r.number, { spins: 6, durationMs: 4200 })
+      } catch {}
       setResult(r)
       // Ajustar fichas según neto del resultado
       try {
@@ -216,9 +222,13 @@ export default function RuletaPage() {
           </CardContent>
         </Card>
 
-        {/* Resultado */}
+        {/* Rueda + Resultado */}
         <Card className="lg:col-span-1">
-          <CardContent className="p-4 space-y-3">
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-center">
+              <RouletteWheel ref={wheelRef} size={320} />
+            </div>
+            <div className="h-px bg-border" />
             <h2 className="font-semibold">Resultado</h2>
             {!result ? (
               <p className="text-sm text-muted-foreground">Aún sin resultados. Agrega apuestas y gira.</p>

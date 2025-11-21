@@ -1,56 +1,87 @@
 # front-blackjack
-Frontend para appweb educativa sobre blackjack
+Frontend para appweb educativa sobre blackjack, ruleta y conteo de cartas.
 
-## Ejecutar el microservicio producto-service (perfil dev)
+## Backend (all-in-one) con Docker
 
-Para que el frontend consuma los endpoints vía proxy, levanta primero el microservicio en `http://localhost:8080` con el perfil `dev` (usa H2 en memoria, sin PostgreSQL).
+Ahora los microservicios de backend (Blackjack, Conteo y Ruleta) corren juntos en un solo contenedor Docker, cada uno expuesto en su puerto:
 
-Opción A (recomendada): usando el Maven Wrapper del proyecto y el JDK embebido del repo
+- Blackjack → 8082 (`/api/v1/blackjack/*`)
+- Conteo → 8083 (`/counter/*`)
+- Ruleta → 8084 (`/roulette/*`)
 
-1) Abre una terminal en PowerShell y ejecuta:
+Requisitos: Docker Desktop instalado y corriendo.
+
+Arrancar el backend consolidado:
 
 ```powershell
-# Ir al proyecto del microservicio
-Set-Location "c:\Users\user\Documents\Programas\producto-service-main\producto-service-main"
-
-# Usar el JDK embebido del repo para evitar instalar Java
-$env:JAVA_HOME = "c:\Users\user\Documents\Programas\Paginas\front-blackjack\backend\tools\jdk\jdk-17.0.17+10"
-$env:PATH = "$env:JAVA_HOME\bin;" + $env:PATH
-
-# Levantar la app con perfil dev (H2)
-./mvnw.cmd '-Dspring-boot.run.profiles=dev' spring-boot:run
+Set-Location "d:\.programas\front-blackjack"
+docker compose up -d --build backend-stack
 ```
 
-Deja esta terminal abierta para que el servicio siga corriendo. Health: http://localhost:8080/actuator/health
-
-Opción B: compilar JAR con Maven portable y ejecutar con el JDK embebido
+Ver logs (opcional):
 
 ```powershell
-# Compilar (desde cualquier carpeta)
-& "c:\Users\user\Documents\Programas\Paginas\front-blackjack\backend\tools\run-mvn.cmd" -f "c:\Users\user\Documents\Programas\producto-service-main\producto-service-main\pom.xml" -DskipTests clean package
-
-# Ejecutar el JAR con perfil dev
-& "c:\Users\user\Documents\Programas\Paginas\front-blackjack\backend\tools\jdk\jdk-17.0.17+10\bin\java.exe" -jar "c:\Users\user\Documents\Programas\producto-service-main\producto-service-main\target\carro-0.0.1-SNAPSHOT.jar" --spring.profiles.active=dev
+docker compose logs -f backend-stack
 ```
 
-Nota: si ves un error de H2 en “exclusive mode”, ya está mitigado en `application-dev.properties` usando una BD en memoria única por ejecución. Si persiste, cierra procesos `java.exe` previos y vuelve a ejecutar.
-
-## Proxy desde Next.js al microservicio
-
-El frontend reescribe llamadas a `/api/blackjack/*` hacia el microservicio en `http://localhost:8080/api/v1/blackjack/*` (ver `next.config.mjs`).
-
-Ejemplos (con el microservicio arriba y el dev server de Next.js en 3000):
+Comprobaciones rápidas de salud (PowerShell):
 
 ```powershell
-# Crear mazo (1 mazo)
+# Blackjack: crear mazo directamente contra 8082
+Invoke-WebRequest -Method Post -Uri 'http://localhost:8082/api/v1/blackjack/deck?decks=1' | Select-Object -ExpandProperty StatusCode
+
+# Conteo: estado
+Invoke-RestMethod -Uri 'http://localhost:8083/counter/status'
+
+# Ruleta: estado
+Invoke-RestMethod -Uri 'http://localhost:8084/roulette/status'
+```
+
+Detener el backend:
+
+```powershell
+docker compose down
+```
+
+## Frontend (Next.js)
+
+Instalar dependencias y levantar el servidor de desarrollo (puerto 3000):
+
+```powershell
+# Con pnpm (recomendado si lo tienes instalado)
+pnpm install
+pnpm dev
+
+# O con npm
+npm install
+npm run dev
+```
+
+## Proxy desde Next.js a los microservicios
+
+El frontend reescribe las llamadas (ver `next.config.mjs`):
+
+- `/api/blackjack/:path*` → `http://localhost:8082/api/v1/blackjack/:path*`
+- `/api/conteo/:path*` → `http://localhost:8083/counter/:path*`
+- `/api/ruleta/:path*` → `http://localhost:8084/roulette/:path*`
+- `/api/users/:path*` → `http://localhost:8085/:path*`
+
+Ejemplos a través del frontend (con Next.js en 3000):
+
+```powershell
+# Blackjack: crear mazo vía proxy del frontend
 Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/blackjack/deck?decks=1'
 
-# Health del microservicio
-Invoke-RestMethod -Uri 'http://localhost:8080/actuator/health'
+# Conteo: estado
+Invoke-RestMethod -Uri 'http://localhost:3000/api/conteo/status'
+
+# Ruleta: girar (cambia apuestas según corresponda)
+$body = @{ bets = @(@{ type = 'COLOR'; value = 'RED'; amount = 10 }) } | ConvertTo-Json
+Invoke-RestMethod -Method Post -ContentType 'application/json' -Body $body -Uri 'http://localhost:3000/api/ruleta/spin'
 ```
 
-## Problemas comunes
+## Notas y problemas comunes
 
-- “mvnw.cmd no se reconoce”: ejecuta el comando dentro de `producto-service-main\producto-service-main`.
-- “No compiler is provided (JRE vs JDK)”: usa la opción A anterior para exportar `JAVA_HOME` al JDK embebido y reintenta.
-- “exclusive mode” de H2: cierra procesos `java.exe` previos o cambia el nombre de la BD en `application-dev.properties`.
+- Si Docker no encuentra la imagen `casino-backend:dev`, asegúrate de estar en la carpeta del repo al ejecutar `docker compose up`.
+- Si un servicio del contenedor all-in-one sale, el contenedor se detendrá; revisa `docker compose logs -f backend-stack` para ver cuál falló.
+- Usuario/Autenticación (`users` en 8085) sigue corriendo como servicio independiente en `docker-compose.yml` y requiere PostgreSQL (contenedor `db-users`).
