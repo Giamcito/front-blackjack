@@ -1,0 +1,49 @@
+services:
+  backend-stack:
+    container_name: casino-backend
+    image: casino-backend:dev
+    build:
+      context: .
+      dockerfile: ./backend/all-in-one/Dockerfile
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - JAVA_OPTS=
+    ports:
+      - "8082:8082"
+      - "8083:8083"
+      - "8084:8084"
+    restart: unless-stopped
+  db-users:
+    image: postgres:16
+    container_name: db-users
+    environment:
+      - POSTGRES_DB=users
+      - POSTGRES_USER=users
+      - POSTGRES_PASSWORD=users
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_users_data:/var/lib/postgresql/data
+    restart: unless-stopped
+  users:
+    container_name: user-service
+    image: user-service:dev
+    build:
+      context: ./backend/user-service
+      dockerfile: Dockerfile
+    environment:
+      - SERVER_PORT=8085
+      - DB_URL=jdbc:postgresql://db-users:5432/users
+      - DB_USER=users
+      - DB_PASSWORD=users
+      - JWT_SECRET=dev_secret_32_bytes_minimum_key!!!!
+      - JWT_EXPIRATION_MS=2592000000
+      - JAVA_OPTS=
+    depends_on:
+      - db-users
+    ports:
+      - "8085:8085"
+    restart: unless-stopped
+
+volumes:
+  db_users_data:

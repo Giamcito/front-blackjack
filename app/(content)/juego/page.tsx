@@ -1,172 +1,1134 @@
+"use client"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Calculator } from "lucide-react"
+import Image, { type StaticImageData } from "next/image"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  createGame as apiCreateGame,
+  dealInitial as apiDealInitial,
+  playerHit as apiPlayerHit,
+  dealerPlay as apiDealerPlay,
+  settleBets as apiSettleBets,
+  getGame as apiGetGame,
+  placeBet as apiPlaceBet,
+  type ApiCard,
+  type ApiGame,
+} from "@/lib/blackjackApi"
+import {
+  initCounter as ccInit,
+  registerCard as ccRegister,
+  getRunningCount as ccGetRunning,
+  getTrueCount as ccGetTrue,
+  resetCounter as ccReset,
+  recommend as ccRecommend,
+  getStatus as ccStatus,
+} from "@/lib/conteoApi"
+import { me as userMe, adjustChips as userAdjustChips } from "@/lib/userApi"
+import Protected from "@/components/protected"
+// Sonidos vía carpeta public para compatibilidad con Turbopack
+const AUDIO_CHIP = "/Sonidos/dinero.m4a"
+const AUDIO_WIN = "/Sonidos/ganador.mp3"
+const AUDIO_LOSE = "/Sonidos/perdedor.mp3"
+
+// Fondo de carta oculta
+import CartaBack from "@/assets/Cartas/CartaBack.png"
+
+// Corazones
+import Corazon1 from "@/assets/Cartas/Corazon1.png"
+import Corazon10 from "@/assets/Cartas/Corazon10.png"
+import Corazon2 from "@/assets/Cartas/Corazon2.png"
+import Corazon3 from "@/assets/Cartas/Corazon3.png"
+import Corazon4 from "@/assets/Cartas/Corazon4.png"
+import Corazon5 from "@/assets/Cartas/Corazon5.png"
+import Corazon6 from "@/assets/Cartas/Corazon6.png"
+import Corazon7 from "@/assets/Cartas/Corazon7.png"
+import Corazon8 from "@/assets/Cartas/Corazon8.png"
+import Corazon9 from "@/assets/Cartas/Corazon9.png"
+import CorazonJ from "@/assets/Cartas/CorazonJ.png"
+import CorazonK from "@/assets/Cartas/CorazonK.png"
+import CorazonQ from "@/assets/Cartas/CorazonQ.png"
+
+// Diamantes
+import Diamante1 from "@/assets/Cartas/Diamante1.png"
+import Diamante10 from "@/assets/Cartas/Diamante10.png"
+import Diamante2 from "@/assets/Cartas/Diamante2.png"
+import Diamante3 from "@/assets/Cartas/Diamante3.png"
+import Diamante4 from "@/assets/Cartas/Diamante4.png"
+import Diamante5 from "@/assets/Cartas/Diamante5.png"
+import Diamante6 from "@/assets/Cartas/Diamante6.png"
+import Diamante7 from "@/assets/Cartas/Diamante7.png"
+import Diamante8 from "@/assets/Cartas/Diamante8.png"
+import Diamante9 from "@/assets/Cartas/Diamante9.png"
+import DiamanteJ from "@/assets/Cartas/DiamanteJ.png"
+import DiamanteK from "@/assets/Cartas/DiamanteK.png"
+import DiamanteQ from "@/assets/Cartas/DiamanteQ.png"
+
+// Picas
+import Pica1 from "@/assets/Cartas/Pica1.png"
+import Pica10 from "@/assets/Cartas/Pica10.png"
+import Pica2 from "@/assets/Cartas/Pica2.png"
+import Pica3 from "@/assets/Cartas/Pica3.png"
+import Pica4 from "@/assets/Cartas/Pica4.png"
+import Pica5 from "@/assets/Cartas/Pica5.png"
+import Pica6 from "@/assets/Cartas/Pica6.png"
+import Pica7 from "@/assets/Cartas/Pica7.png"
+import Pica8 from "@/assets/Cartas/Pica8.png"
+import Pica9 from "@/assets/Cartas/Pica9.png"
+import PicaJ from "@/assets/Cartas/PicaJ.png"
+import PicaK from "@/assets/Cartas/PicaK.png"
+import PicaQ from "@/assets/Cartas/PicaQ.png"
+
+// Tréboles
+import Trebol1 from "@/assets/Cartas/Trebol1.png"
+import Trebol10 from "@/assets/Cartas/Trebol10.png"
+import Trebol2 from "@/assets/Cartas/Trebol2.png"
+import Trebol3 from "@/assets/Cartas/Trebol3.png"
+import Trebol4 from "@/assets/Cartas/Trebol4.png"
+import Trebol5 from "@/assets/Cartas/Trebol5.png"
+import Trebol6 from "@/assets/Cartas/Trebol6.png"
+import Trebol7 from "@/assets/Cartas/Trebol7.png"
+import Trebol8 from "@/assets/Cartas/Trebol8.png"
+import Trebol9 from "@/assets/Cartas/Trebol9.png"
+import TrebolJ from "@/assets/Cartas/TrebolJ.png"
+import TrebolK from "@/assets/Cartas/TrebolK.png"
+import TrebolQ from "@/assets/Cartas/TrebolQ.png"
+
+type Suit = "Corazon" | "Diamante" | "Pica" | "Trebol"
+type Rank = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "J" | "Q" | "K"
+type Phase = "betting" | "player" | "dealer" | "settled"
+
+interface PlayingCard {
+  suit: Suit
+  rank: Rank
+  img: StaticImageData
+}
+
+const IMAGE_MAP: Record<Suit, Record<Rank, StaticImageData>> = {
+  Corazon: {
+    1: Corazon1,
+    2: Corazon2,
+    3: Corazon3,
+    4: Corazon4,
+    5: Corazon5,
+    6: Corazon6,
+    7: Corazon7,
+    8: Corazon8,
+    9: Corazon9,
+    10: Corazon10,
+    J: CorazonJ,
+    Q: CorazonQ,
+    K: CorazonK,
+  } as unknown as Record<Rank, StaticImageData>,
+  Diamante: {
+    1: Diamante1,
+    2: Diamante2,
+    3: Diamante3,
+    4: Diamante4,
+    5: Diamante5,
+    6: Diamante6,
+    7: Diamante7,
+    8: Diamante8,
+    9: Diamante9,
+    10: Diamante10,
+    J: DiamanteJ,
+    Q: DiamanteQ,
+    K: DiamanteK,
+  } as unknown as Record<Rank, StaticImageData>,
+  Pica: {
+    1: Pica1,
+    2: Pica2,
+    3: Pica3,
+    4: Pica4,
+    5: Pica5,
+    6: Pica6,
+    7: Pica7,
+    8: Pica8,
+    9: Pica9,
+    10: Pica10,
+    J: PicaJ,
+    Q: PicaQ,
+    K: PicaK,
+  } as unknown as Record<Rank, StaticImageData>,
+  Trebol: {
+    1: Trebol1,
+    2: Trebol2,
+    3: Trebol3,
+    4: Trebol4,
+    5: Trebol5,
+    6: Trebol6,
+    7: Trebol7,
+    8: Trebol8,
+    9: Trebol9,
+    10: Trebol10,
+    J: TrebolJ,
+    Q: TrebolQ,
+    K: TrebolK,
+  } as unknown as Record<Rank, StaticImageData>,
+}
+
+const SUITS: Suit[] = ["Corazon", "Diamante", "Pica", "Trebol"]
+const RANKS: Rank[] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+
+function buildDeck(numDecks = 1): PlayingCard[] {
+  const deck: PlayingCard[] = []
+  for (let d = 0; d < numDecks; d++) {
+    for (const suit of SUITS) {
+      for (const rank of RANKS) {
+        deck.push({ suit, rank, img: IMAGE_MAP[suit][rank] })
+      }
+    }
+  }
+  return deck
+}
+
+function shuffle<T>(array: T[]): T[] {
+  const a = [...array]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+function handValue(hand: PlayingCard[]): { total: number; isSoft: boolean } {
+  let total = 0
+  let aces = 0
+  for (const c of hand) {
+    if (c.rank === "J" || c.rank === "Q" || c.rank === "K") total += 10
+    else if (c.rank === "1") {
+      aces += 1
+      total += 1
+    } else total += Number(c.rank)
+  }
+  let isSoft = false
+  while (aces > 0 && total + 10 <= 21) {
+    total += 10
+    aces -= 1
+    isSoft = true
+  }
+  return { total, isSoft }
+}
+
+function isBlackjack(hand: PlayingCard[]): boolean {
+  return hand.length === 2 && handValue(hand).total === 21
+}
+
+const formatCurrency = (n: number) =>
+  new Intl.NumberFormat("es-CO", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n)
 
 export default function JuegoPage() {
+  // Modo backend: usa microservicio vía proxy /api/blackjack/*
+  const USE_BACKEND = true
+  const [gameId, setGameId] = useState<string | null>(null)
+  const [apiDump, setApiDump] = useState<string>("")
+  const [apiBusy, setApiBusy] = useState<boolean>(false)
+  const [phase, setPhase] = useState<Phase>("betting")
+  const gameAreaRef = useRef<HTMLDivElement | null>(null)
+  // Referencia mutable del mazo para evitar duplicaciones al robar varias cartas en un mismo tick.
+  const deckRef = useRef<PlayingCard[]>(shuffle(buildDeck(1)))
+  const [shoe, setShoe] = useState<PlayingCard[]>(deckRef.current)
+  const [player, setPlayer] = useState<PlayingCard[]>([])
+  const [dealer, setDealer] = useState<PlayingCard[]>([])
+  const [balance, setBalance] = useState<number>(0)
+  const [pendingBet, setPendingBet] = useState<number>(0)
+  const [bet, setBet] = useState<number>(0)
+  const [revealDealer, setRevealDealer] = useState<boolean>(false)
+  const [message, setMessage] = useState<string>("Realiza tu apuesta para comenzar")
+  // Cartas restantes reportadas por el backend (si está disponible)
+  const [deckRemaining, setDeckRemaining] = useState<number | null>(null)
+  // Selección de color del tablero (tonos medianamente oscuros)
+  const BOARD_COLORS: Record<string, { from: string; to: string; label: string }> = {
+    // Verde original: usar variables CSS para mantener la apariencia previa
+    green: { from: "var(--casino-felt)", to: "var(--casino-green)", label: "Verde" },
+    rojo: { from: "#7f1d1d", to: "#991b1b", label: "Rojo" },
+    azul: { from: "#0f172a", to: "#1e3a8a", label: "Azul" },
+    amarillo: { from: "#92400e", to: "#b45309", label: "Amarillo" },
+    rosa: { from: "#6b1230", to: "#9f1239", label: "Rosa" },
+    gris: { from: "#111827", to: "#374151", label: "Gris" },
+    negro: { from: "#030712", to: "#0b1221", label: "Negro" },
+    cafe: { from: "#3b2418", to: "#4b2e2a", label: "Café" },
+  }
+  const [boardColor, setBoardColor] = useState<string>("green")
+  // Conteo: running y true
+  const [runningCount, setRunningCount] = useState<number | null>(null)
+  const [trueCount, setTrueCount] = useState<number | null>(null)
+  const [conteoBusy, setConteoBusy] = useState<boolean>(false)
+  const conteoRegisteredRef = useRef<Set<string>>(new Set())
+  // Saldo al inicio de la ronda para normalizar pagos (win/push/blackjack)
+  const roundStartBalanceRef = useRef<number>(balance)
+  // Para evitar cierre obsoleto: pasar mano del jugador a la liquidación cuando auto-se planta
+  const settlementPlayerRef = useRef<PlayingCard[] | null>(null)
+  // Para evitar cierre obsoleto del valor de apuesta (especialmente tras doblar)
+  const betRef = useRef<number>(0)
+  useEffect(() => {
+    betRef.current = bet
+  }, [bet])
+  // Audio refs
+  const winAudioRef = useRef<HTMLAudioElement | null>(null)
+  const loseAudioRef = useRef<HTMLAudioElement | null>(null)
+  const chipAudioRef = useRef<HTMLAudioElement | null>(null)
+  // AudioContext compartido para beep de respaldo (si faltan archivos)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+
+  // Inicializa objetos de audio de forma programática al primer gesto del usuario
+  const ensureAudio = useCallback(() => {
+    if (!winAudioRef.current) {
+      const a = new Audio(AUDIO_WIN)
+      a.preload = "auto"
+      a.onerror = () => { winAudioRef.current = null }
+      winAudioRef.current = a
+    }
+    if (!loseAudioRef.current) {
+      const a = new Audio(AUDIO_LOSE)
+      a.preload = "auto"
+      a.onerror = () => { loseAudioRef.current = null }
+      loseAudioRef.current = a
+    }
+    if (!chipAudioRef.current) {
+      const a = new Audio(AUDIO_CHIP)
+      a.preload = "auto"
+      a.onerror = () => { chipAudioRef.current = null }
+      chipAudioRef.current = a
+    }
+    if (typeof window !== "undefined" && !audioCtxRef.current) {
+      try {
+        // AudioContext debe crearse tras un gesto del usuario
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+      } catch {}
+    }
+  }, [])
+
+  // Tiny beep fallback using Web Audio API when the audio files are missing
+  const playBeep = useCallback((kind: "win" | "lose" | "chip") => {
+    const ctx = audioCtxRef.current
+    if (!ctx) return
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    let freq = 440
+    let duration = 0.18
+    let volume = 0.07
+    if (kind === "win") { freq = 880; duration = 0.22; volume = 0.09 }
+    if (kind === "lose") { freq = 220; duration = 0.25; volume = 0.06 }
+    if (kind === "chip") { freq = 600; duration = 0.08; volume = 0.05 }
+    osc.type = kind === "lose" ? "sawtooth" : "sine"
+    osc.frequency.value = freq
+    gain.gain.value = volume
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    const now = ctx.currentTime
+    osc.start(now)
+    // quick decay for a snappy click/coin effect
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration)
+    osc.stop(now + duration + 0.02)
+  }, [])
+
+  const playAudioOrBeep = useCallback((audio: HTMLAudioElement | null, kind: "win" | "lose" | "chip") => {
+    if (!audio) {
+      playBeep(kind)
+      return
+    }
+    try {
+      audio.pause()
+      audio.currentTime = 0
+      const p = audio.play()
+      if (p && typeof p.then === "function") {
+        p.catch(() => playBeep(kind))
+      }
+    } catch {
+      playBeep(kind)
+    }
+  }, [playBeep])
+
+  // Helpers centralizados para disparar sonidos
+  const playWin = useCallback(() => {
+    ensureAudio()
+    playAudioOrBeep(winAudioRef.current, "win")
+  }, [ensureAudio, playAudioOrBeep])
+  const playLose = useCallback(() => {
+    ensureAudio()
+    playAudioOrBeep(loseAudioRef.current, "lose")
+  }, [ensureAudio, playAudioOrBeep])
+  const playChipSound = useCallback(() => {
+    ensureAudio()
+    playAudioOrBeep(chipAudioRef.current, "chip")
+  }, [ensureAudio, playAudioOrBeep])
+
+  // Cargar saldo desde el servicio de usuarios al montar
+  useEffect(() => {
+    let mounted = true
+    userMe().then(u => { if (mounted) setBalance(u.chips) }).catch(() => {})
+    return () => { mounted = false }
+  }, [])
+
+  // Helper para sincronizar delta de fichas con el backend y reflejar saldo real
+  const syncChipsDelta = useCallback(async (delta: number) => {
+    try {
+      if (delta !== 0) {
+        const u = await userAdjustChips(delta)
+        setBalance(u.chips)
+      } else {
+        const u = await userMe()
+        setBalance(u.chips)
+      }
+    } catch {
+      // Ignorar errores (p. ej. no autenticado), mantener saldo local
+    }
+  }, [])
+
+  const playerTotal = useMemo(() => handValue(player).total, [player])
+  const dealerTotal = useMemo(() => handValue(dealer).total, [dealer])
+
+  const canDouble = phase === "player" && player.length === 2 && balance >= bet && bet > 0
+
+  const drawCard = useCallback((): PlayingCard => {
+    if (deckRef.current.length <= 10) {
+      deckRef.current = shuffle(buildDeck(1))
+    }
+    const card = deckRef.current[0]
+    deckRef.current = deckRef.current.slice(1)
+    setShoe(deckRef.current)
+    return card
+  }, [])
+
+  // Mapear carta de API a carta con imagen local
+  const mapApiCard = useCallback((c: ApiCard): PlayingCard => {
+    const suit: Suit = c.suit === 0 ? "Trebol" : c.suit === 1 ? "Diamante" : c.suit === 2 ? "Corazon" : "Pica"
+    let rank: Rank
+    if (c.rank === 11) rank = "J"
+    else if (c.rank === 12) rank = "Q"
+    else if (c.rank === 13) rank = "K"
+    else rank = String(c.rank) as Rank
+    return { suit, rank, img: IMAGE_MAP[suit][rank] }
+  }, [])
+
+  // Helpers Conteo
+  const cardPipValue = useCallback((c: PlayingCard): number => {
+    if (c.rank === "1") return 11 // As
+    if (c.rank === "J" || c.rank === "Q" || c.rank === "K") return 10
+    return Number(c.rank)
+  }, [])
+
+  const keyOfCard = (c: PlayingCard) => `${c.suit}-${c.rank}`
+
+  const refreshConteoCounts = useCallback(async () => {
+    try {
+      const [r, t] = await Promise.all([ccGetRunning(), ccGetTrue()])
+      setRunningCount(r.count)
+      setTrueCount(t.count)
+    } catch {}
+  }, [])
+
+  const ensureConteoInitialized = useCallback(async (numDecks: number) => {
+    try {
+      const status = await ccStatus().catch(() => "")
+      if (!status || /not initialized/i.test(status)) {
+        await ccInit(numDecks)
+        conteoRegisteredRef.current.clear()
+      }
+    } catch {}
+    await refreshConteoCounts()
+  }, [refreshConteoCounts])
+
+  const registerVisibleCards = useCallback(async (playerCards: PlayingCard[], dealerCards: PlayingCard[], reveal: boolean) => {
+    const reg = conteoRegisteredRef.current
+    const toRegister: number[] = []
+    for (const c of playerCards) {
+      const k = `P-${keyOfCard(c)}`
+      if (!reg.has(k)) {
+        reg.add(k)
+        toRegister.push(cardPipValue(c))
+      }
+    }
+    // Solo carta visible del dealer si no se revela
+    const dealerVisible = reveal ? dealerCards : dealerCards.slice(0, 1)
+    for (const c of dealerVisible) {
+      const k = `D-${keyOfCard(c)}`
+      if (!reg.has(k)) {
+        reg.add(k)
+        toRegister.push(cardPipValue(c))
+      }
+    }
+    if (toRegister.length > 0) {
+      setConteoBusy(true)
+      try {
+        // Registrar en orden
+        for (const v of toRegister) {
+          await ccRegister(v)
+        }
+      } catch {}
+      setConteoBusy(false)
+      await refreshConteoCounts()
+    }
+  }, [cardPipValue, refreshConteoCounts])
+
+  const refreshFromApiGame = useCallback((g: ApiGame) => {
+    const p0 = g.players?.[0]
+    const playerCards: PlayingCard[] = (p0?.hand || []).map(mapApiCard)
+    const dealerCards: PlayingCard[] = (g.dealer?.hand || []).map(mapApiCard)
+    setPlayer(playerCards)
+    setDealer(dealerCards)
+    // Si el backend expone cartas restantes del mazo, reflejarlas
+    try {
+      // @ts-ignore - algunos backends incluyen deck.remaining en la respuesta del juego
+      const rem = (g as any)?.deck?.remaining
+      if (typeof rem === 'number') {
+        setDeckRemaining(rem)
+      }
+    } catch {}
+    // Registrar solo visibles (dealer: 1) después de deal si aún no se reveló
+    registerVisibleCards(playerCards, dealerCards, false)
+  }, [mapApiCard])
+
+  const dealInitial = useCallback(() => {
+    const p1 = drawCard()
+    const d1 = drawCard()
+    const p2 = drawCard()
+    const d2 = drawCard()
+    const initialPlayer = [p1, p2]
+    const initialDealer = [d1, d2]
+    setPlayer(initialPlayer)
+    setDealer(initialDealer)
+    setRevealDealer(false)
+
+    const playerBJ = isBlackjack(initialPlayer)
+    const dealerBJ = isBlackjack(initialDealer)
+
+    if (playerBJ || dealerBJ) {
+      setRevealDealer(true)
+      setPhase("settled")
+      if (playerBJ && dealerBJ) {
+        setMessage("Ambos tienen Blackjack. Empate.")
+        // Empate: delta 0
+        setBalance(() => roundStartBalanceRef.current)
+        void syncChipsDelta(0)
+      } else if (playerBJ) {
+        setMessage("¡Blackjack! Pago 3:2")
+        // Pago total = apuesta + 1.5x de ganancia; saldo final = saldo inicial + 2.5 * bet
+        const currentBet = betRef.current
+        setBalance(() => roundStartBalanceRef.current + Math.round(currentBet * 2.5))
+        playWin()
+        void syncChipsDelta(Math.round(currentBet * 1.5))
+      } else {
+        setMessage("Crupier tiene Blackjack. Pierdes.")
+        // Pierde: saldo final = saldo inicial - apuesta
+        const currentBet = betRef.current
+        setBalance(() => roundStartBalanceRef.current - currentBet)
+        playLose()
+        void syncChipsDelta(-currentBet)
+      }
+    } else {
+      setPhase("player")
+      setMessage("Tu turno: pide carta o plántate")
+    }
+  }, [drawCard])
+
+  const startRound = async () => {
+    if (pendingBet <= 0 || pendingBet > balance) return
+    setBet(pendingBet) // actualizará betRef via useEffect
+    // Capturar saldo inicial de la ronda y descontar la apuesta
+    setBalance((b) => {
+      roundStartBalanceRef.current = b
+      return b - pendingBet
+    })
+    setPendingBet(0)
+    setMessage("Repartiendo...")
+    requestAnimationFrame(() => {
+      gameAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+    })
+
+    if (!USE_BACKEND) {
+      setTimeout(dealInitial, 200)
+      return
+    }
+    try {
+      // Reutilizar el mismo juego (y mazo) entre rondas; crear solo si no existe
+      let id = gameId
+      let isNewGame = false
+      if (!id) {
+        const cg = await apiCreateGame(1, 1)
+        id = cg.game.id
+        setGameId(id)
+        // Inicializar conteo (si aún no) con el número de mazos del juego
+        await ensureConteoInitialized(cg.game?.deck?.numDecks || 1)
+        // Intentar barajar el mazo del juego recién creado para asegurar aleatoriedad
+        try {
+          // Si el backend devuelve el deck en la respuesta de createGame, usarlo
+          const deckId = cg.game?.deck?.id
+          if (deckId) {
+            const seed = Date.now() & 0x7fffffff
+            const { shuffleDeck: apiShuffleDeck } = await import("@/lib/blackjackApi")
+            await apiShuffleDeck(deckId, seed)
+          }
+        } catch {}
+        isNewGame = true
+      }
+      // Sincronizar apuesta en el servidor (para liquidación correcta)
+      try {
+        await apiPlaceBet(id!, 0, pendingBet)
+        await apiDealInitial(id!)
+      } catch {
+        // Si el juego expiró/ no existe en el backend (p.ej. reinicio del microservicio), recrear
+        const cg2 = await apiCreateGame(1, 1)
+        id = cg2.game.id
+        setGameId(id)
+        await ensureConteoInitialized(cg2.game?.deck?.numDecks || 1)
+        // Barajar el mazo del juego recreado
+        try {
+          const deckId2 = cg2.game?.deck?.id
+          if (deckId2) {
+            const seed2 = Date.now() & 0x7fffffff
+            const { shuffleDeck: apiShuffleDeck } = await import("@/lib/blackjackApi")
+            await apiShuffleDeck(deckId2, seed2)
+          }
+        } catch {}
+        await apiPlaceBet(id!, 0, pendingBet)
+        await apiDealInitial(id!)
+      }
+      const g = await apiGetGame(id!)
+      refreshFromApiGame(g.game)
+
+      const playerBJ = isBlackjack((g.game.players?.[0]?.hand || []).map(mapApiCard))
+      const dealerBJ = isBlackjack((g.game.dealer?.hand || []).map(mapApiCard))
+      setRevealDealer(false)
+      if (playerBJ || dealerBJ) {
+        setRevealDealer(true)
+        setPhase("settled")
+        if (playerBJ && dealerBJ) {
+          setMessage("Ambos tienen Blackjack. Empate.")
+          setBalance(() => roundStartBalanceRef.current)
+        } else if (playerBJ) {
+          setMessage("¡Blackjack! Pago 3:2")
+          const currentBet = betRef.current
+          setBalance(() => roundStartBalanceRef.current + Math.round(currentBet * 2.5))
+          playWin()
+        } else {
+          setMessage("Crupier tiene Blackjack. Pierdes.")
+          const currentBet = betRef.current
+          setBalance(() => roundStartBalanceRef.current - currentBet)
+          playLose()
+        }
+      } else {
+        setPhase("player")
+        setMessage("Tu turno: pide carta o plántate")
+      }
+    } catch (e) {
+      setMessage("No se pudo iniciar la ronda. Intenta de nuevo.")
+    }
+  }
+
+  const hit = async () => {
+    if (phase !== "player") return
+    if (!USE_BACKEND) {
+      const c = drawCard()
+      setPlayer(h => {
+        const next = [...h, c]
+        const { total } = handValue(next)
+        if (total > 21) {
+          setPhase("settled")
+          setRevealDealer(true)
+          setMessage("Te pasaste de 21. Pierdes.")
+          playLose()
+          void syncChipsDelta(-betRef.current)
+        } else if (total === 21) {
+          settlementPlayerRef.current = next
+          setTimeout(() => stand(), 150)
+        }
+        return next
+      })
+      return
+    }
+    if (!gameId) return
+    await apiPlayerHit(gameId, 0)
+    const g = await apiGetGame(gameId)
+    refreshFromApiGame(g.game)
+    // Registrar la nueva carta pedida del jugador
+    try {
+      const cards = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+      await registerVisibleCards(cards.slice(-1), [], false)
+    } catch {}
+    const total = handValue((g.game.players?.[0]?.hand || []).map(mapApiCard)).total
+    if (total > 21) {
+      setPhase("settled")
+      setRevealDealer(true)
+      setMessage("Te pasaste de 21. Pierdes.")
+      playLose()
+      await syncChipsDelta(-betRef.current)
+    } else if (total === 21) {
+      settlementPlayerRef.current = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+      setTimeout(() => stand(), 150)
+    }
+  }
+
+  const stand = async () => {
+    if (phase !== "player") return
+    setRevealDealer(true)
+    setPhase("dealer")
+
+    if (!USE_BACKEND) {
+      setTimeout(() => {
+        setDealer((current) => {
+          let next = [...current]
+          while (handValue(next).total < 17) {
+            next = [...next, drawCard()]
+          }
+          const playerForTotal = settlementPlayerRef.current ?? player
+          settlementPlayerRef.current = null
+          const p = handValue(playerForTotal).total
+          const d = handValue(next).total
+          let msg: string
+          if (d > 21) {
+            msg = "Crupier se pasa. ¡Ganas!"
+            const currentBet = betRef.current
+            setBalance(() => roundStartBalanceRef.current + currentBet)
+            playWin()
+            void syncChipsDelta(currentBet)
+          } else if (p > d) {
+            msg = "¡Ganas!"
+            const currentBet = betRef.current
+            setBalance(() => roundStartBalanceRef.current + currentBet)
+            playWin()
+            void syncChipsDelta(currentBet)
+          } else if (p < d) {
+            msg = "Pierdes."
+            const currentBet = betRef.current
+            setBalance(() => roundStartBalanceRef.current - currentBet)
+            playLose()
+            void syncChipsDelta(-currentBet)
+          } else {
+            msg = "Empate. Se devuelve la apuesta."
+            setBalance(() => roundStartBalanceRef.current)
+            void syncChipsDelta(0)
+          }
+          setMessage(msg)
+          setPhase("settled")
+          return next
+        })
+      }, 250)
+      return
+    }
+    if (!gameId) return
+    await apiDealerPlay(gameId)
+    await apiSettleBets(gameId)
+    const g = await apiGetGame(gameId)
+    refreshFromApiGame(g.game)
+    // Ahora se revelan todas las cartas del dealer: registrar las nuevas visibles
+    try {
+      const pCards = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+      const dCards = (g.game.dealer?.hand || []).map(mapApiCard)
+      await registerVisibleCards(pCards, dCards, true)
+    } catch {}
+    const p = handValue((settlementPlayerRef.current ?? (g.game.players?.[0]?.hand || []).map(mapApiCard)) as PlayingCard[]).total
+    settlementPlayerRef.current = null
+    const d = handValue((g.game.dealer?.hand || []).map(mapApiCard)).total
+    let msg: string
+    if (d > 21) {
+      msg = "Crupier se pasa. ¡Ganas!"
+      const currentBet = betRef.current
+      setBalance(() => roundStartBalanceRef.current + currentBet)
+      playWin()
+      await syncChipsDelta(currentBet)
+    } else if (p > d) {
+      msg = "¡Ganas!"
+      const currentBet = betRef.current
+      setBalance(() => roundStartBalanceRef.current + currentBet)
+      playWin()
+      await syncChipsDelta(currentBet)
+    } else if (p < d) {
+      msg = "Pierdes."
+      const currentBet = betRef.current
+      setBalance(() => roundStartBalanceRef.current - currentBet)
+      playLose()
+      await syncChipsDelta(-currentBet)
+    } else {
+      msg = "Empate. Se devuelve la apuesta."
+      setBalance(() => roundStartBalanceRef.current)
+      await syncChipsDelta(0)
+    }
+    setMessage(msg)
+    setPhase("settled")
+  }
+
+  const doubleDown = async () => {
+    if (!canDouble) return
+    setBalance(b => b - bet)
+    setBet(v => v * 2)
+    if (!USE_BACKEND) {
+      const c = drawCard()
+      setPlayer(h => {
+        const next = [...h, c]
+        const { total } = handValue(next)
+        if (total > 21) {
+          setPhase("settled")
+          setRevealDealer(true)
+          setMessage("Te pasaste de 21. Pierdes.")
+          playLose()
+          void syncChipsDelta(-betRef.current)
+        } else {
+          settlementPlayerRef.current = next
+          setTimeout(stand, 150)
+        }
+        return next
+      })
+      return
+    }
+    if (!gameId) return
+    // Reflejar doble de apuesta en el servidor
+    try { await apiPlaceBet(gameId, 0, bet) } catch {}
+    await apiPlayerHit(gameId, 0)
+    const g = await apiGetGame(gameId)
+    const next = (g.game.players?.[0]?.hand || []).map(mapApiCard)
+    setPlayer(next)
+    const { total } = handValue(next)
+    if (total > 21) {
+      setPhase("settled")
+      setRevealDealer(true)
+      setMessage("Te pasaste de 21. Pierdes.")
+      playLose()
+      await syncChipsDelta(-betRef.current)
+    } else {
+      settlementPlayerRef.current = next
+      setTimeout(stand, 150)
+    }
+  }
+
+  const clearBet = () => setPendingBet(0)
+  const addChip = (amount: number) => {
+    if (phase !== "betting") return
+    setPendingBet((cur) => Math.min(balance, cur + amount))
+    // Sonido de ficha
+    playChipSound()
+  }
+
+  const newRound = () => {
+    setPlayer([])
+    setDealer([])
+    setRevealDealer(false)
+    setBet(0)
+    setPhase("betting")
+    setMessage("Realiza tu apuesta para comenzar")
+    setApiDump("")
+  // No reseteamos conteo por defecto (se mantiene por zapato). Si quieres reiniciar, usa botón "Reset conteo".
+    // Sólo rebarajar el mazo local en modo sin backend
+    if (!USE_BACKEND) {
+      if (deckRef.current.length < 30) {
+        deckRef.current = shuffle(buildDeck(1))
+        setShoe(deckRef.current)
+      }
+    }
+    // Reposicionar al inicio en nueva ronda para facilitar apuestas
+    requestAnimationFrame(() => {
+      gameAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    })
+  }
+
+  // Utilidades de backend para depurar/administrar partida
+  const viewApiState = async () => {
+    if (!USE_BACKEND || !gameId) return
+    setApiBusy(true)
+    try {
+      const g = await apiGetGame(gameId)
+      setApiDump(JSON.stringify(g, null, 2))
+    } catch (e: any) {
+      setApiDump(`Error: ${e?.message ?? "desconocido"}`)
+    } finally {
+      setApiBusy(false)
+    }
+  }
+
+  const resetGame = async () => {
+    // Borra en backend si hay partida activa, y limpia el estado local
+    try {
+      if (USE_BACKEND && gameId) {
+        // Lazy import para evitar circular: usar la firma ya importada arriba
+        const { deleteGame: apiDeleteGame } = await import("@/lib/blackjackApi")
+        await apiDeleteGame(gameId)
+      }
+    } catch {}
+    setGameId(null)
+    setDeckRemaining(null)
+    conteoRegisteredRef.current.clear()
+    newRound()
+  }
+
   return (
-    <div className="container mx-auto max-w-6xl">
-      <h1 className="font-[var(--font-display)] text-4xl md:text-5xl font-bold text-center mb-4 text-[var(--casino-gold)]">
-        Zona de Juego
+  <Protected>
+  <div className="relative mx-auto max-w-7xl px-2 md:px-4" onPointerDown={ensureAudio}>
+      <h1 className="font-[var(--font-display)] text-3xl md:text-4xl font-bold text-center mb-3 text-[var(--casino-gold)]">
+        Blackjack Educativo
       </h1>
-      <p className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto">
-        Practica tus habilidades con nuestro simulador educativo
+      <p className="text-center text-muted-foreground mb-8 max-w-2xl mx-auto text-sm md:text-base">
+        Ajusta tu apuesta, juega y practica la estrategia básica
       </p>
 
-      <Card className="bg-gradient-to-br from-[var(--casino-felt)] to-[var(--casino-green)] border-[var(--casino-gold)]/30 overflow-hidden">
-        <CardContent className="p-0">
-          {/* Betting Screen (placeholder - interactive logic por implementar) */}
-          <div className="relative min-h-[600px] flex flex-col items-center justify-center p-8">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--casino-green)_0%,_var(--casino-felt)_100%)] opacity-80" />
+      <div className="flex flex-col lg:flex-row items-start gap-6">
+        {/* Tablero principal */}
+        <Card
+          ref={gameAreaRef}
+          className="flex-1 border-[var(--casino-gold)]/40 overflow-hidden relative shadow-2xl rounded-3xl"
+          style={{ background: `linear-gradient(135deg, ${BOARD_COLORS[boardColor].from}, ${BOARD_COLORS[boardColor].to})` }}
+        >
+          <CardContent className="p-0">
+            <div className="relative min-h-[620px] flex flex-col items-center justify-center p-8">
+              {/* Fondo decorativo animado */}
+              <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.08),transparent_60%),radial-gradient(circle_at_70%_70%,rgba(255,215,0,0.08),transparent_65%)]" />
+              {/* Viñeta neutra para oscurecer bordes sin teñir el color del tablero */}
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.32)_100%)] pointer-events-none" />
 
             <div className="relative z-10 w-full max-w-4xl">
-              <div className="text-center mb-12">
-                <div className="inline-block px-6 py-2 bg-background/80 backdrop-blur rounded-full border border-[var(--casino-gold)]/50 mb-8">
+              {/* Dealer */}
+              <div className="text-center mb-6">
+                <div className="inline-block px-6 py-2 bg-background/80 backdrop-blur rounded-full border border-[var(--casino-gold)]/50 mb-4">
                   <span className="text-[var(--casino-gold)] font-bold">CRUPIER</span>
                 </div>
-              </div>
-
-              <div className="text-center mb-12">
-                <div className="inline-block px-8 py-4 bg-background/90 backdrop-blur rounded-2xl border border-primary/50">
-                  <p className="text-primary text-lg font-semibold">Realiza tu apuesta para comenzar</p>
+                <div className="flex items-center justify-center gap-5 flex-wrap">
+                  {dealer.length === 0 && (
+                    <div className="text-sm text-muted-foreground italic">Esperando ronda...</div>
+                  )}
+                  {dealer.map((c, idx) => (
+                    <div
+                      key={`d-${idx}`}
+                      className="relative w-[104px] h-[150px] md:w-[128px] md:h-[186px] rounded-xl overflow-hidden shadow-[0_8px_18px_-4px_rgba(0,0,0,0.6)] border border-[var(--casino-gold)]/40 bg-background/10 backdrop-blur-sm transition-transform duration-200 animate-[fadeIn_0.4s_ease]"
+                      style={{ animationDelay: `${idx * 80}ms` }}
+                    >
+                      {idx === 1 && !revealDealer ? (
+                        <Image src={CartaBack} alt="Carta oculta" fill className="object-contain" />
+                      ) : (
+                        <Image src={c.img} alt={`${c.suit} ${c.rank}`} fill className="object-contain" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 text-sm text-foreground/90">
+                  {dealer.length > 0 && (
+                    <span>Total: {revealDealer ? dealerTotal : handValue([dealer[0]]).total}</span>
+                  )}
                 </div>
               </div>
 
-              <div className="text-center mb-12">
+              {/* Mensajes */}
+              <div className="text-center mb-10">
+                <div className="inline-block px-10 py-5 bg-gradient-to-r from-primary/90 to-primary/40 backdrop-blur-md rounded-3xl border border-primary/60 shadow-[0_0_0_2px_rgba(255,255,255,0.05),0_10px_25px_-5px_rgba(0,0,0,0.5)] relative overflow-hidden">
+                  <div className="absolute inset-0 opacity-30 mix-blend-overlay [background:repeating-linear-gradient(45deg,rgba(255,255,255,0.15)_0_8px,transparent_8px_16px)]" />
+                  <p className="relative text-background text-xl font-bold tracking-wide drop-shadow-sm animate-[fadeIn_0.5s_ease]" aria-live="polite">{message}</p>
+                </div>
+              </div>
+
+              {/* Player */}
+              <div className="text-center mb-4">
                 <div className="inline-block px-6 py-2 bg-background/80 backdrop-blur rounded-full border border-[var(--casino-gold)]/50">
                   <span className="text-[var(--casino-gold)] font-bold">JUGADOR</span>
                 </div>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-5">
+                  {player.map((c, idx) => (
+                    <div
+                      key={`p-${idx}`}
+                      className="relative w-[104px] h-[150px] md:w-[128px] md:h-[186px] rounded-xl overflow-hidden shadow-[0_8px_18px_-4px_rgba(0,0,0,0.6)] border border-primary/40 bg-background/10 backdrop-blur-sm transition-transform duration-200 hover:scale-105 animate-[fadeIn_0.45s_ease]"
+                      style={{ animationDelay: `${idx * 70}ms` }}
+                    >
+                      <Image src={c.img} alt={`${c.suit} ${c.rank}`} fill className="object-contain" />
+                    </div>
+                  ))}
+                </div>
+                {player.length > 0 && (
+                  <div className="mt-2 text-sm text-foreground/90">Total: {playerTotal}</div>
+                )}
               </div>
             </div>
 
-            {/* Bottom Controls with balance and chips */}
             <div className="relative z-10 w-full max-w-5xl mt-auto">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                {/* Balance */}
-                <Card className="bg-background/90 backdrop-blur border-border">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2">
-                      <div className="text-primary">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"
-                          />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Saldo</p>
-                        <p className="text-lg font-bold text-primary">$1,000</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+              {/* Eliminados cuadros de saldo/apuesta/acciones - ahora overlay fijo arriba izq */}
 
-                {/* Bet Amount */}
-                <Card className="bg-background/90 backdrop-blur border-[var(--casino-gold)]/30">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2">
-                      <div className="text-secondary">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"
-                          />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Apuesta</p>
-                        <p className="text-lg font-bold text-secondary">$0</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Chip Selector Label */}
-                <Card className="bg-background/90 backdrop-blur border-border">
-                  <CardContent className="p-4 flex items-center justify-center">
-                    <p className="text-sm font-semibold text-foreground">Selecciona tus fichas</p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Chips Selection */}
-              <div className="flex flex-wrap justify-center gap-3 mb-6">
-                {[
-                  { value: "$10", color: "bg-destructive", border: "border-destructive" },
-                  { value: "$25", color: "bg-primary", border: "border-primary" },
-                  { value: "$50", color: "bg-blue-600", border: "border-blue-600" },
-                  { value: "$100", color: "bg-zinc-700", border: "border-zinc-500" },
-                  { value: "$500", color: "bg-purple-600", border: "border-purple-500" },
-                  { value: "$1000", color: "bg-[var(--casino-gold)]", border: "border-[var(--casino-gold)]" },
-                ].map((chip) => (
-                  <button
-                    key={chip.value}
-                    className={`w-14 h-14 md:w-16 md:h-16 rounded-full ${chip.color} ${chip.border} border-4 flex items-center justify-center font-bold text-white shadow-lg hover:scale-110 transition-transform`}
+              {phase === "betting" ? (
+                <div className="flex flex-wrap justify-center gap-3 mb-6">
+                  {[
+                    { label: "$10", amount: 10, color: "bg-destructive", border: "border-destructive" },
+                    { label: "$25", amount: 25, color: "bg-primary", border: "border-primary" },
+                    { label: "$50", amount: 50, color: "bg-blue-600", border: "border-blue-600" },
+                    { label: "$100", amount: 100, color: "bg-zinc-700", border: "border-zinc-500" },
+                    { label: "$500", amount: 500, color: "bg-purple-600", border: "border-purple-500" },
+                    { label: "$1000", amount: 1000, color: "bg-[var(--casino-gold)]", border: "border-[var(--casino-gold)]" },
+                  ].map((chip) => (
+                    <button
+                      key={chip.label}
+                      onClick={() => addChip(chip.amount)}
+                      className={`w-14 h-14 md:w-16 md:h-16 rounded-full ${chip.color} ${chip.border} border-4 flex items-center justify-center font-bold text-white shadow-lg hover:scale-110 transition-transform disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed`}
+                      disabled={pendingBet >= balance}
+                      aria-label={`Agregar ficha de ${chip.label}`}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap justify-center gap-4 mb-8">
+                  <Button
+                    size="lg"
+                    variant="default"
+                    className="min-w-32 h-14 text-base font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
+                    onClick={hit}
+                    disabled={phase !== "player"}
                   >
-                    {chip.value}
-                  </button>
-                ))}
-              </div>
+                    Pedir carta
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="destructive"
+                    className="min-w-32 h-14 text-base font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
+                    onClick={stand}
+                    disabled={phase !== "player"}
+                  >
+                    Plantarse
+                  </Button>
+                  <Button
+                    size="lg"
+                    className="min-w-32 h-14 text-base font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/90 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
+                    onClick={doubleDown}
+                    disabled={!canDouble}
+                  >
+                    Doblar
+                  </Button>
+                  {phase === "settled" && (
+                    <Button
+                      size="lg"
+                      className="min-w-32 h-14 text-base font-semibold bg-[var(--casino-gold)] text-background hover:bg-[var(--casino-gold)]/90 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer disabled:cursor-not-allowed"
+                      onClick={newRound}
+                    >
+                      Nueva Ronda
+                    </Button>
+                  )}
+                </div>
+              )}
 
-              {/* Action Buttons */}
-              <div className="grid grid-cols-2 gap-4">
-                <Button size="lg" variant="destructive" className="w-full text-base">
-                  Limpiar
-                </Button>
-                <Button size="lg" className="w-full bg-primary hover:bg-primary/90 text-base">
-                  Confirmar
-                </Button>
-              </div>
+              {phase === "betting" ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <Button size="lg" variant="destructive" className="w-full text-base cursor-pointer disabled:cursor-not-allowed" onClick={clearBet} disabled={pendingBet === 0}>
+                    Limpiar
+                  </Button>
+                  <Button
+                    size="lg"
+                    className="w-full bg-primary hover:bg-primary/90 text-base cursor-pointer disabled:cursor-not-allowed"
+                    onClick={startRound}
+                    disabled={pendingBet === 0 || pendingBet > balance}
+                  >
+                    Confirmar
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center text-xs text-muted-foreground">
+                  {phase === "player" ? "Tu turno" : phase === "dealer" ? "Turno del crupier" : "Ronda finalizada"}
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
-      </Card>
-
-      <div className="mt-8 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-primary/10 border-primary/30">
-          <CardContent className="p-4 text-center">
-            <div className="w-10 h-10 rounded-full bg-primary mx-auto mb-2 flex items-center justify-center">
-              <span className="text-xl">🎴</span>
-            </div>
-            <h4 className="font-bold text-primary mb-1">Pedir Carta</h4>
-            <p className="text-xs text-muted-foreground">Solicita una carta adicional</p>
-          </CardContent>
         </Card>
 
-        <Card className="bg-destructive/10 border-destructive/30">
-          <CardContent className="p-4 text-center">
-            <div className="w-10 h-10 rounded-full bg-destructive mx-auto mb-2 flex items-center justify-center">
-              <span className="text-xl">✋</span>
+        {/* Panel lateral (overlay al lado del tablero) */}
+        <aside className="w-full lg:w-64 flex-shrink-0 space-y-4 lg:sticky top-6">
+          <div className="px-5 py-4 rounded-2xl bg-black/55 backdrop-blur border border-[var(--casino-gold)]/50 shadow-md">
+            <p className="text-xs uppercase tracking-wider text-[var(--casino-gold)] font-semibold mb-1">Saldo</p>
+            <p className="text-2xl font-bold text-[var(--casino-gold)] drop-shadow">{formatCurrency(balance)}</p>
+            <p className="text-[10px] text-zinc-300 mt-1">El saldo se sincroniza con tu cuenta al finalizar cada ronda.</p>
+          </div>
+          <div className="px-5 py-4 rounded-2xl bg-black/50 backdrop-blur border border-primary/40 shadow-md">
+            <p className="text-xs uppercase tracking-wider text-primary font-semibold mb-1">Apuesta</p>
+            <p className="text-xl font-bold text-primary drop-shadow">{formatCurrency(phase === "betting" ? pendingBet : bet)}</p>
+          </div>
+          <div className="px-5 py-4 rounded-2xl bg-black/40 backdrop-blur border border-zinc-600/40 shadow-md">
+            <p className="text-xs uppercase tracking-wider text-zinc-300 font-semibold mb-1">Estado</p>
+            <p className="text-sm font-medium text-zinc-200">
+              {phase === "betting" && "Apostando"}
+              {phase === "player" && "Turno del jugador"}
+              {phase === "dealer" && "Turno del crupier"}
+              {phase === "settled" && "Ronda finalizada"}
+            </p>
+          </div>
+          <div className="px-5 py-4 rounded-2xl bg-black/30 backdrop-blur border border-zinc-600/30 shadow-md">
+            <p className="text-xs uppercase tracking-wider text-zinc-300 font-semibold mb-1">Tablero</p>
+            <p className="text-sm text-zinc-200 mb-2">Color del tablero</p>
+                <div className="flex gap-2 flex-wrap">
+              {Object.entries(BOARD_COLORS).map(([key, c]) => (
+                <button
+                  key={key}
+                  onClick={() => setBoardColor(key)}
+                  title={c.label}
+                  aria-label={`Seleccionar color ${c.label}`}
+                      className={`w-8 h-8 rounded-full border-2 flex-shrink-0 transition-transform hover:scale-105 ${boardColor === key ? 'ring-2 ring-offset-1 ring-[var(--casino-gold)]' : ''} cursor-pointer disabled:cursor-not-allowed`}
+                  style={{ background: `linear-gradient(135deg, ${c.from}, ${c.to})` }}
+                />
+              ))}
             </div>
-            <h4 className="font-bold text-destructive mb-1">Plantarse</h4>
-            <p className="text-xs text-muted-foreground">Mantén tu mano actual</p>
-          </CardContent>
-        </Card>
+          </div>
+        </aside>
+  </div>
 
-        <Card className="bg-secondary/10 border-secondary/30">
-          <CardContent className="p-4 text-center">
-            <div className="w-10 h-10 rounded-full bg-secondary mx-auto mb-2 flex items-center justify-center">
-              <span className="text-xl">2️⃣</span>
-            </div>
-            <h4 className="font-bold text-secondary mb-1">Doblar</h4>
-            <p className="text-xs text-muted-foreground">Duplica tu apuesta</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-[var(--casino-gold)]/10 border-[var(--casino-gold)]/30">
-          <CardContent className="p-4 text-center">
-            <div className="w-10 h-10 rounded-full bg-[var(--casino-gold)] mx-auto mb-2 flex items-center justify-center">
-              <Calculator className="w-5 h-5 text-background" />
-            </div>
-            <h4 className="font-bold text-[var(--casino-gold)] mb-1">Conteo de Cartas</h4>
-            <p className="text-xs text-muted-foreground">Activa el modo avanzado</p>
-          </CardContent>
-        </Card>
+      {/* Controles backend (compactos, debajo del juego) */}
+      <div className="mt-6">
+        <div className="mx-auto max-w-4xl px-4">
+          <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-3 rounded-xl bg-black/40 backdrop-blur border border-zinc-600/40">
+            <span className="text-xs text-zinc-300">Game ID: {gameId ?? "—"}</span>
+            {deckRemaining != null && (
+              <span className="text-xs text-zinc-300">Restantes: {deckRemaining}</span>
+            )}
+            {runningCount != null && (
+              <span className="text-xs text-emerald-300">Running: {runningCount}</span>
+            )}
+            {trueCount != null && (
+              <span className="text-xs text-emerald-300">True: {trueCount}</span>
+            )}
+            <Button size="sm" className="cursor-pointer disabled:cursor-not-allowed" onClick={viewApiState} disabled={!gameId || apiBusy}>
+              {apiBusy ? "Cargando..." : "Ver estado (API)"}
+            </Button>
+            <Button size="sm" variant="secondary" className="cursor-pointer disabled:cursor-not-allowed" onClick={resetGame}>
+              Reset partida
+            </Button>
+            <Button size="sm" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" onClick={async () => {
+              setConteoBusy(true)
+              try {
+                await ccReset()
+              } catch {
+                // Si no está inicializado, inicializar de forma segura y continuar
+                try {
+                  let decks = 1
+                  if (gameId) {
+                    try {
+                      const g = await apiGetGame(gameId)
+                      decks = g.game?.deck?.numDecks || 1
+                    } catch {}
+                  } else if (deckRemaining != null) {
+                    decks = Math.max(1, Math.round((deckRemaining as number) / 52))
+                  }
+                  await ensureConteoInitialized(decks)
+                } catch {}
+              } finally {
+                conteoRegisteredRef.current.clear()
+                await refreshConteoCounts()
+                setConteoBusy(false)
+              }
+            }} disabled={conteoBusy}>
+              {conteoBusy ? "..." : "Reset conteo"}
+            </Button>
+            <Button size="sm" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" onClick={async () => {
+              try {
+                // Recomendación según totales actuales visibles
+                const rec = await ccRecommend(playerTotal, dealer.length > 0 ? cardPipValue(dealer[0]) : 2)
+                const r = (rec.recommendation || '').toUpperCase()
+                const recEs = r === 'HIT' ? 'Pedir carta' : r === 'STAND' ? 'Plantarse' : rec.recommendation
+                setMessage(`Sugerencia: ${recEs}`)
+              } catch {}
+            }}>
+              Recomendar
+            </Button>
+          </div>
+          {apiDump && (
+            <pre className="mt-3 max-h-60 overflow-auto text-xs text-zinc-200 bg-black/40 p-3 rounded-lg border border-zinc-600/40">
+              {apiDump}
+            </pre>
+          )}
+        </div>
       </div>
     </div>
+  </Protected>
   )
 }
