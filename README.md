@@ -1,3 +1,11 @@
+#links repositorios:
+#
+#
+#
+#
+#
+
+
 # front-blackjack
 Frontend para appweb educativa sobre blackjack, ruleta y conteo de cartas.
 
