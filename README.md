@@ -1,9 +1,7 @@
-#links repositorios:
-#
-#
-#
-#
-#
+# links repositorios:
+# https://github.com/Giamcito/paginacion.git
+# https://github.com/Giamcito/backend-blackjack.git
+# https://github.com/Giamcito/library-blackjack.git
 
 
 # front-blackjack
